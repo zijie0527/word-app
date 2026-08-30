@@ -1654,31 +1654,22 @@ async function gradeCard(item, grade) {
   const requeue = updated.requeue;
   delete updated.requeue; // 這個欄位只是前端邏輯用，不寫進資料庫
 
-  // 這裡是兩個獨立的資料庫請求（更新排程、寫入紀錄），不是同一筆交易。
-  // 如果只更新了排程卻沒寫紀錄成功，統計會少一筆但排程仍正確；
-  // 反過來如果排程更新失敗，就不該假裝這次複習成功，所以先檢查第一步。
-  const { error: stateError } = await sb
-    .from('review_state')
-    .update(updated)
-    .eq('card_id', item.card_id);
-
-  if (stateError) {
-    alert('複習紀錄儲存失敗，請檢查網路連線後重試：\n' + stateError.message);
-    return; // 停在原地，不跳下一張、不寫入 review_logs，避免資料不一致
-  }
-
-  // 寫入複習紀錄（用於正確率統計）
-  const { error: logError } = await sb.from('review_logs').insert({
-    card_id: item.card_id,
-    user_id: currentUser.id,
-    grade: grade,
+  // 更新排程 + 寫入紀錄包在 Supabase 的 grade_card RPC 裡，是同一筆資料庫交易，
+  // 不會再有「排程更新成功但紀錄沒寫到」這種中間狀態。
+  const { error: rpcError } = await sb.rpc('grade_card', {
+    p_card_id: item.card_id,
+    p_grade: grade,
+    p_ease_factor: updated.ease_factor,
+    p_interval_days: updated.interval_days,
+    p_repetitions: updated.repetitions,
+    p_learning_step: updated.learning_step,
+    p_is_learning: updated.is_learning,
+    p_next_review_date: updated.next_review_date,
   });
 
-  if (logError) {
-    // 排程已經更新成功了，只是統計紀錄沒寫到——不影響複習本身，
-    // 但要讓使用者知道這次的紀錄可能不會出現在統計頁裡
-    console.error('review_logs 寫入失敗：', logError.message);
-    alert('複習已生效，但這次的紀錄可能不會出現在統計頁裡（' + logError.message + '）');
+  if (rpcError) {
+    alert('複習紀錄儲存失敗，請檢查網路連線後重試：\n' + rpcError.message);
+    return; // 停在原地，不跳下一張，避免資料不一致
   }
 
   // 更新本地 item 狀態，供之後可能的重排使用
