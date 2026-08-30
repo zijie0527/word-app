@@ -1839,18 +1839,44 @@ async function importWordbankRows(rows, toast) {
     newUnits.forEach(u => { unitNameToId[u.name] = u.id; });
   }
 
-  // 查重（單字+解釋都一樣才算重複，避免重複點擊這個按鈕產生重複卡片）
-  await loadExistingFrontsSet();
-  const { toInsert: toInsertRows, duplicates } = splitDuplicates(rows);
+  // 判斷每一列屬於哪一種情況：
+  // 1. 單字完全沒建過 → 要新增卡片＋連結
+  // 2. 單字建過，但沒連到這個單元（例如之前刪過這個單元，字還在但被解除關聯）→ 只補連結
+  // 3. 單字建過，也已經連到這個單元 → 不用動
+  // 只用「有沒有這個單字」判斷會漏掉情況 2，導致刪除單元後永遠無法把字補回去。
+  toast.textContent = '檢查現有單字...';
+  const { data: existingCards } = await fetchAllRows((from, to) => sb.from('cards').select('id, front, back').range(from, to));
+  const existingCardIdByKey = new Map();
+  (existingCards || []).forEach(c => { existingCardIdByKey.set(cardDedupKey(c.front, c.back), c.id); });
 
-  if (toInsertRows.length === 0) {
+  const { data: existingLinks } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id, unit_id').range(from, to));
+  const existingLinkSet = new Set((existingLinks || []).map(l => `${l.card_id}|${l.unit_id}`));
+
+  const rowsToCreate = [];
+  const linksToRestore = [];
+  let alreadyOkCount = 0;
+
+  rows.forEach(r => {
+    const unitId = unitNameToId[r.unit];
+    const existingCardId = existingCardIdByKey.get(cardDedupKey(r.front, r.back));
+
+    if (!existingCardId) {
+      rowsToCreate.push(r);
+    } else if (!existingLinkSet.has(`${existingCardId}|${unitId}`)) {
+      linksToRestore.push({ card_id: existingCardId, unit_id: unitId });
+    } else {
+      alreadyOkCount++;
+    }
+  });
+
+  if (rowsToCreate.length === 0 && linksToRestore.length === 0) {
     toast.style.color = 'var(--warn)';
-    toast.textContent = '這些單字都已經在你的單字庫裡了，沒有新增任何卡片';
+    toast.textContent = '這些單字都已經在你的單字庫裡，而且都在正確的單元裡了';
     return;
   }
 
   const rowsByUnit = {};
-  toInsertRows.forEach(r => {
+  rowsToCreate.forEach(r => {
     if (!rowsByUnit[r.unit]) rowsByUnit[r.unit] = [];
     rowsByUnit[r.unit].push(r);
   });
@@ -1885,7 +1911,7 @@ async function importWordbankRows(rows, toast) {
       await sb.from('card_units').insert(links);
     }
 
-    toast.textContent = `匯入中...（${allCardIds.length}/${toInsertRows.length}）`;
+    toast.textContent = `匯入中...（${allCardIds.length}/${rowsToCreate.length}）`;
   }
 
   if (allCardIds.length > 0) {
@@ -1895,11 +1921,22 @@ async function importWordbankRows(rows, toast) {
     }
   }
 
+  // 把「單字已存在但沒連到這個單元」的關聯補回去
+  let restoredCount = 0;
+  if (linksToRestore.length > 0) {
+    toast.textContent = `補回 ${linksToRestore.length} 個既有單字的分類...`;
+    for (let i = 0; i < linksToRestore.length; i += BATCH_SIZE) {
+      const batch = linksToRestore.slice(i, i + BATCH_SIZE);
+      const { error } = await sb.from('card_units').insert(batch);
+      if (!error) restoredCount += batch.length;
+    }
+  }
+
   let resultMsg = `完成！新增了 ${allCardIds.length} 個單字，建立了 ${missingUnitNames.length} 個新單元`;
-  if (duplicates.length > 0) resultMsg += `，${duplicates.length} 個已存在的單字略過`;
+  if (restoredCount > 0) resultMsg += `，補回 ${restoredCount} 個既有單字的單元分類`;
   if (failedCount > 0) resultMsg += `，${failedCount} 個寫入失敗`;
 
-  toast.style.color = (failedCount > 0) ? 'var(--danger)' : (duplicates.length > 0 ? 'var(--warn)' : 'var(--accent)');
+  toast.style.color = (failedCount > 0) ? 'var(--danger)' : 'var(--accent)';
   toast.textContent = resultMsg;
 
   await loadExistingFrontsSet();
