@@ -377,7 +377,6 @@
     color: var(--muted);
     font-style: italic;
     margin-top: 10px;
-    display: none;
   }
 
   .review-hint {
@@ -2073,8 +2072,8 @@ function renderReviewArea() {
     <div class="review-card" id="flip-area">
       ${learningBadge}
       <div class="review-front">${escapeHtml(card.front)}</div>
+      ${card.example ? `<div class="review-example">${escapeHtml(card.example)}</div>` : ''}
       <div class="review-back" id="review-back">${escapeHtml(card.back)}</div>
-      ${card.example ? `<div class="review-example" id="review-example">${escapeHtml(card.example)}</div>` : ''}
       <div class="review-hint" id="review-hint">點卡片看解釋</div>
     </div>
     <div class="answer-buttons hidden" id="answer-buttons">
@@ -2111,8 +2110,6 @@ function flipCurrentCard() {
   const back = document.getElementById('review-back');
   if (!back || back.style.display === 'block') return;
   back.style.display = 'block';
-  const example = document.getElementById('review-example');
-  if (example) example.style.display = 'block';
   document.getElementById('review-hint').classList.add('hidden');
   document.getElementById('answer-buttons').classList.remove('hidden');
 }
