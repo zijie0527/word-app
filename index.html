@@ -843,8 +843,12 @@
           <div class="word-list" id="unit-detail-words"></div>
         </div>
         <div class="card-box" id="delete-unit-box">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-bottom:12px;">
+            <input type="checkbox" id="delete-unit-words-too" style="width:auto;margin:0;">
+            同時刪除這個單元裡的所有單字（連同複習紀錄，無法復原）
+          </label>
           <button class="btn-primary" id="delete-unit-btn" style="background:var(--danger);">刪除這個單元</button>
-          <div style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center;">只會解除單字與此單元的關聯，單字本身及其他單元的分類不受影響</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center;">預設只會解除單字與此單元的關聯，單字本身及其他單元的分類不受影響</div>
           <div class="toast" id="delete-unit-toast"></div>
         </div>
       </div>
@@ -1071,6 +1075,23 @@ async function fetchAllRows(buildQuery) {
   return { data: all, error: null };
 }
 
+// 刪除某個單元底下的「所有單字本身」（不是只解除關聯）。
+// 刪 cards 會透過既有的 cascade 自動連帶刪掉 review_state / review_logs / card_units，
+// 呼叫端刪完卡片後還是要自己另外刪 units 那一列。
+async function deleteCardsInUnit(unitId) {
+  const { data: links } = await fetchAllRows((from, to) =>
+    sb.from('card_units').select('card_id').eq('unit_id', unitId).range(from, to)
+  );
+  const cardIds = (links || []).map(l => l.card_id);
+
+  const BATCH_SIZE = 200;
+  for (let i = 0; i < cardIds.length; i += BATCH_SIZE) {
+    const { error } = await sb.from('cards').delete().in('id', cardIds.slice(i, i + BATCH_SIZE));
+    if (error) return error;
+  }
+  return null;
+}
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -1282,7 +1303,18 @@ async function renderUnitList() {
   listEl.querySelectorAll('.del-btn').forEach(btn => {
     btn.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm('刪除單元只會解除卡片與此單元的關聯；卡片及其在其他單元中的分類不受影響。確定嗎？')) return;
+      if (!confirm('確定要刪除這個單元嗎？')) return;
+
+      const deleteWordsToo = confirm('要同時刪除這個單元裡的所有單字嗎（連同複習紀錄，無法復原）？\n\n選「取消」的話，單字會保留，只是變成未分類。');
+
+      if (deleteWordsToo) {
+        const error = await deleteCardsInUnit(btn.dataset.id);
+        if (error) {
+          alert('刪除單字失敗：' + error.message);
+          return;
+        }
+      }
+
       await sb.from('units').delete().eq('id', btn.dataset.id);
       loadUnits();
     };
@@ -1391,15 +1423,29 @@ document.getElementById('rename-unit-btn').onclick = async () => {
 document.getElementById('delete-unit-btn').onclick = async () => {
   const unit = allUnits.find(u => u.id === currentDetailUnitId);
   const unitName = unit ? unit.name : '這個單元';
+  const deleteWordsToo = document.getElementById('delete-unit-words-too').checked;
+  const toast = document.getElementById('delete-unit-toast');
 
-  if (!confirm(`確定要刪除「${unitName}」嗎？\n\n單字本身不會被刪除，會變成未分類。這個動作無法復原。`)) {
+  const confirmMsg = deleteWordsToo
+    ? `確定要刪除「${unitName}」嗎？\n\n這個單元裡的所有單字會被永久刪除，連同複習紀錄一起消失。這個動作無法復原。`
+    : `確定要刪除「${unitName}」嗎？\n\n單字本身不會被刪除，會變成未分類。這個動作無法復原。`;
+
+  if (!confirm(confirmMsg)) {
     return;
+  }
+
+  if (deleteWordsToo) {
+    const deleteError = await deleteCardsInUnit(currentDetailUnitId);
+    if (deleteError) {
+      toast.style.color = 'var(--danger)';
+      toast.textContent = '刪除單字失敗：' + deleteError.message;
+      return;
+    }
   }
 
   const { error } = await sb.from('units').delete().eq('id', currentDetailUnitId);
 
   if (error) {
-    const toast = document.getElementById('delete-unit-toast');
     toast.style.color = 'var(--danger)';
     toast.textContent = '刪除失敗：' + error.message;
     return;
