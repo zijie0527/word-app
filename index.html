@@ -1184,10 +1184,13 @@ function attachEditHandlers(containerEl, cardsById, refreshFn) {
 async function loadUnits() {
   const { data: units } = await sb
     .from('units')
-    .select('*')
-    .order('created_at', { ascending: true });
+    .select('*');
 
-  allUnits = units || [];
+  // 按名稱排序（數字由小到大、英文照 a-z），不照建立先後順序，
+  // 這樣像 1-1、1-2…2-1 這種課本單元名稱才會照直覺的順序排列。
+  allUnits = (units || []).sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  );
   populateUnitSelects();
   renderUnitList();
 }
