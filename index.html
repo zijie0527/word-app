@@ -534,6 +534,94 @@
     background: var(--accent);
   }
 
+  /* ---------- Teacher tab ---------- */
+  .invite-code-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--accent-soft);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 10px;
+  }
+
+  .invite-code-text {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+  }
+
+  .invite-code-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .invite-code-row:last-child { border-bottom: none; }
+
+  .student-row {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .student-row:last-child { border-bottom: none; }
+
+  .student-row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .student-email { font-weight: 600; font-size: 14px; }
+
+  .student-metrics {
+    display: flex;
+    gap: 16px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .student-metrics b { color: var(--ink); }
+
+  .risk-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+
+  .risk-badge.warn { color: var(--warn); background: var(--warn-soft); }
+  .risk-badge.danger { color: var(--danger); background: var(--danger-soft); }
+
+  .link-btn {
+    background: none;
+    color: var(--muted);
+    font-size: 12px;
+    text-decoration: underline;
+    padding: 2px;
+  }
+
+  .review-remaining {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    text-align: center;
+  }
+
+  .inline-error {
+    color: var(--danger);
+    font-size: 13px;
+    text-align: center;
+    margin-top: 12px;
+    min-height: 18px;
+  }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -575,6 +663,7 @@
       <button class="tab" data-tab="import">匯入</button>
       <button class="tab" data-tab="units">單元</button>
       <button class="tab" data-tab="stats">統計</button>
+      <button class="tab" data-tab="teacher">師生</button>
     </div>
 
     <!-- REVIEW TAB -->
@@ -597,6 +686,7 @@
       </div>
 
       <div id="review-area"></div>
+      <div class="inline-error" id="review-error"></div>
     </div>
 
     <!-- ADD TAB -->
@@ -673,6 +763,7 @@
         <div class="card-box" id="delete-unit-box">
           <button class="btn-primary" id="delete-unit-btn" style="background:var(--danger);">刪除這個單元</button>
           <div style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center;">只會解除單字與此單元的關聯，單字本身及其他單元的分類不受影響</div>
+          <div class="toast" id="delete-unit-toast"></div>
         </div>
       </div>
     </div>
@@ -712,6 +803,33 @@
       <div class="chart-box">
         <h2>各單元進度</h2>
         <div id="unit-progress-list"></div>
+      </div>
+    </div>
+
+    <!-- TEACHER TAB -->
+    <div id="tab-teacher" class="hidden">
+      <div class="card-box">
+        <h2>我的學生</h2>
+        <div class="field">
+          <button class="btn-secondary" id="gen-invite-btn">產生邀請碼</button>
+        </div>
+        <div id="invite-code-display"></div>
+        <div class="toast" id="teacher-toast"></div>
+        <div id="active-invite-list"></div>
+      </div>
+      <div class="card-box" id="students-list-box">
+        <div id="students-list"></div>
+      </div>
+
+      <div class="card-box">
+        <h2>加入老師</h2>
+        <div class="field">
+          <label>老師給你的邀請碼</label>
+          <input type="text" id="join-code-input" placeholder="例如：AB12CD" style="text-transform:uppercase;">
+        </div>
+        <button class="btn-primary" id="join-teacher-btn">加入</button>
+        <div class="toast" id="join-toast"></div>
+        <div id="my-teachers-list"></div>
       </div>
     </div>
   </div>
@@ -817,7 +935,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     const target = tab.dataset.tab;
-    ['review', 'add', 'import', 'units', 'stats'].forEach(name => {
+    ['review', 'add', 'import', 'units', 'stats', 'teacher'].forEach(name => {
       document.getElementById('tab-' + name).classList.toggle('hidden', name !== target);
     });
     if (target === 'review') loadDueCards();
@@ -829,6 +947,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       loadUnits();
     }
     if (target === 'stats') loadStats();
+    if (target === 'teacher') loadTeacherTab();
   };
 });
 
@@ -1082,7 +1201,9 @@ document.getElementById('delete-unit-btn').onclick = async () => {
   const { error } = await sb.from('units').delete().eq('id', currentDetailUnitId);
 
   if (error) {
-    alert('刪除失敗：' + error.message);
+    const toast = document.getElementById('delete-unit-toast');
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '刪除失敗：' + error.message;
     return;
   }
 
@@ -1463,7 +1584,10 @@ function renderReviewArea() {
     ? '<div class="learning-badge">學習中</div>'
     : '';
 
+  const remaining = dueCards.length - currentCardIndex;
+
   area.innerHTML = `
+    <div class="review-remaining">還剩 ${remaining} 張（空白鍵看解釋，1-4 評分）</div>
     <div class="review-card" id="flip-area">
       ${learningBadge}
       <div class="review-front">${escapeHtml(card.front)}</div>
@@ -1490,11 +1614,7 @@ function renderReviewArea() {
     </div>
   `;
 
-  document.getElementById('flip-area').onclick = () => {
-    document.getElementById('review-back').style.display = 'block';
-    document.getElementById('review-hint').classList.add('hidden');
-    document.getElementById('answer-buttons').classList.remove('hidden');
-  };
+  document.getElementById('flip-area').onclick = flipCurrentCard;
 
   document.querySelectorAll('.ans-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -1503,6 +1623,40 @@ function renderReviewArea() {
     };
   });
 }
+
+function flipCurrentCard() {
+  const back = document.getElementById('review-back');
+  if (!back || back.style.display === 'block') return;
+  back.style.display = 'block';
+  document.getElementById('review-hint').classList.add('hidden');
+  document.getElementById('answer-buttons').classList.remove('hidden');
+}
+
+// 鍵盤快捷鍵：空白鍵/Enter 翻卡，1-4 對應四個評分按鈕。
+// 只在「複習」分頁顯示中、且焦點不在輸入框時生效，避免跟其他分頁的打字互相干擾。
+const GRADE_KEYS = { '1': 'again', '2': 'hard', '3': 'good', '4': 'easy' };
+
+document.addEventListener('keydown', (e) => {
+  const reviewTab = document.getElementById('tab-review');
+  if (!reviewTab || reviewTab.classList.contains('hidden')) return;
+
+  const activeTag = document.activeElement && document.activeElement.tagName;
+  if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
+
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    flipCurrentCard();
+    return;
+  }
+
+  if (GRADE_KEYS[e.key]) {
+    const answerButtons = document.getElementById('answer-buttons');
+    if (!answerButtons || answerButtons.classList.contains('hidden')) return;
+    if (currentCardIndex >= dueCards.length) return;
+    e.preventDefault();
+    gradeCard(dueCards[currentCardIndex], GRADE_KEYS[e.key]);
+  }
+});
 
 // 學習中階段的步驟數（不是分鐘，是「本輪內要再出現幾次才畢業」）
 const LEARNING_STEPS = 2; // 第0步、第1步，通過第1步之後畢業
@@ -1668,9 +1822,10 @@ async function gradeCard(item, grade) {
   });
 
   if (rpcError) {
-    alert('複習紀錄儲存失敗，請檢查網路連線後重試：\n' + rpcError.message);
+    document.getElementById('review-error').textContent = '複習紀錄儲存失敗，請檢查網路連線後重試：' + rpcError.message;
     return; // 停在原地，不跳下一張，避免資料不一致
   }
+  document.getElementById('review-error').textContent = '';
 
   // 更新本地 item 狀態，供之後可能的重排使用
   Object.assign(item, updated);
@@ -1861,6 +2016,207 @@ function renderProgressRow(name, learned, total, pct) {
       </div>
     </div>
   `;
+}
+
+// ===== 師生（老師總覽 + 加入老師）=====
+function loadTeacherTab() {
+  document.getElementById('teacher-toast').textContent = '';
+  document.getElementById('join-toast').textContent = '';
+  loadActiveInviteCodes();
+  loadMyStudents();
+  loadMyTeachers();
+}
+
+function generateInviteCode() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 避開容易看錯的字元（0/O、1/I）
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+document.getElementById('gen-invite-btn').onclick = async () => {
+  const toast = document.getElementById('teacher-toast');
+  toast.textContent = '';
+
+  let error = null;
+  let code = '';
+  // 邀請碼是隨機產生，理論上極少撞號，撞到就重試幾次即可
+  for (let attempt = 0; attempt < 5; attempt++) {
+    code = generateInviteCode();
+    const res = await sb.from('invite_codes').insert({ code, teacher_id: currentUser.id });
+    error = res.error;
+    if (!error) break;
+  }
+
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '產生邀請碼失敗：' + error.message;
+    return;
+  }
+
+  document.getElementById('invite-code-display').innerHTML = `
+    <div class="invite-code-box">
+      <span class="invite-code-text">${escapeHtml(code)}</span>
+      <button class="btn-secondary" style="width:auto;padding:8px 16px;" id="copy-invite-btn">複製</button>
+    </div>
+  `;
+  document.getElementById('copy-invite-btn').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.style.color = 'var(--accent)';
+      toast.textContent = '已複製到剪貼簿';
+    } catch {
+      toast.style.color = 'var(--muted)';
+      toast.textContent = '複製失敗，請手動複製上面的邀請碼';
+    }
+  };
+
+  loadActiveInviteCodes();
+};
+
+async function loadActiveInviteCodes() {
+  const { data } = await sb
+    .from('invite_codes')
+    .select('code, created_at')
+    .eq('teacher_id', currentUser.id)
+    .is('redeemed_by', null)
+    .order('created_at', { ascending: false });
+
+  const listEl = document.getElementById('active-invite-list');
+  if (!data || data.length === 0) {
+    listEl.innerHTML = '';
+    return;
+  }
+
+  listEl.innerHTML = data.map(c => `
+    <div class="invite-code-row">
+      <span>${escapeHtml(c.code)}（尚未使用）</span>
+      <button class="link-btn" data-code="${escapeHtml(c.code)}">作廢</button>
+    </div>
+  `).join('');
+
+  listEl.querySelectorAll('.link-btn').forEach(btn => {
+    btn.onclick = async () => {
+      await sb.from('invite_codes').delete().eq('code', btn.dataset.code);
+      loadActiveInviteCodes();
+    };
+  });
+}
+
+document.getElementById('join-teacher-btn').onclick = async () => {
+  const input = document.getElementById('join-code-input');
+  const code = input.value.trim().toUpperCase();
+  const toast = document.getElementById('join-toast');
+  toast.textContent = '';
+
+  if (!code) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '請輸入邀請碼';
+    return;
+  }
+
+  const { data: teacherEmail, error } = await sb.rpc('redeem_invite_code', { p_code: code });
+
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '加入失敗：' + error.message;
+    return;
+  }
+
+  toast.style.color = 'var(--accent)';
+  toast.textContent = `已加入老師：${teacherEmail}`;
+  input.value = '';
+  loadMyTeachers();
+};
+
+async function loadMyTeachers() {
+  const { data, error } = await sb.rpc('get_my_teachers');
+  const listEl = document.getElementById('my-teachers-list');
+
+  if (error || !data || data.length === 0) {
+    listEl.innerHTML = '';
+    return;
+  }
+
+  listEl.innerHTML = '<div style="margin-top:14px;font-size:13px;color:var(--muted);">目前的老師：' +
+    data.map(t => escapeHtml(t.email)).join('、') + '</div>';
+}
+
+// 一次把所有已連結學生的 cards / review_state / review_logs 抓回來，
+// 不管有幾個學生都只需要固定 4 個請求（get_my_students + 3 張表），在分頁裡分組計算。
+async function loadMyStudents() {
+  const listEl = document.getElementById('students-list');
+
+  const { data: students, error: studentsError } = await sb.rpc('get_my_students');
+
+  if (studentsError) {
+    listEl.innerHTML = `<p style="color:var(--danger);font-size:14px;">讀取學生列表失敗：${escapeHtml(studentsError.message)}</p>`;
+    return;
+  }
+
+  if (!students || students.length === 0) {
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:14px;">還沒有連結任何學生，產生邀請碼分享給他們吧</p>';
+    return;
+  }
+
+  const studentIds = students.map(s => s.student_id);
+
+  const { data: cards } = await sb.from('cards').select('id, user_id').in('user_id', studentIds);
+  const cardOwner = {};
+  (cards || []).forEach(c => { cardOwner[c.id] = c.user_id; });
+  const cardIds = Object.keys(cardOwner);
+
+  const { data: states } = cardIds.length
+    ? await sb.from('review_state').select('card_id, repetitions').in('card_id', cardIds)
+    : { data: [] };
+
+  const { data: logs } = await sb.from('review_logs').select('user_id, grade, reviewed_at').in('user_id', studentIds);
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  const rows = students.map(s => {
+    const total = (cards || []).filter(c => c.user_id === s.student_id).length;
+    const learned = (states || []).filter(st => cardOwner[st.card_id] === s.student_id && st.repetitions >= 2).length;
+
+    const studentLogs = (logs || []).filter(l => l.user_id === s.student_id);
+    const recentLogs = studentLogs.filter(l => new Date(l.reviewed_at) >= sevenDaysAgo);
+    const correct = recentLogs.filter(l => l.grade === 'good' || l.grade === 'easy').length;
+    const accuracy = recentLogs.length > 0 ? Math.round((correct / recentLogs.length) * 100) : null;
+
+    const lastActiveTs = studentLogs.reduce((max, l) => {
+      const t = new Date(l.reviewed_at).getTime();
+      return t > max ? t : max;
+    }, 0);
+    const daysSinceActive = lastActiveTs ? Math.floor((Date.now() - lastActiveTs) / 86400000) : null;
+
+    return { ...s, total, learned, accuracy, daysSinceActive };
+  });
+
+  listEl.innerHTML = `<h2>我的學生（${rows.length}）</h2>` + rows.map(r => {
+    let badge = '';
+    if (r.daysSinceActive === null) {
+      badge = '<span class="risk-badge warn">還沒開始複習</span>';
+    } else if (r.daysSinceActive >= 3) {
+      badge = `<span class="risk-badge danger">已 ${r.daysSinceActive} 天沒複習</span>`;
+    } else if (r.accuracy !== null && r.accuracy < 60) {
+      badge = '<span class="risk-badge warn">近期正確率偏低</span>';
+    }
+
+    return `
+      <div class="student-row">
+        <div class="student-row-top">
+          <span class="student-email">${escapeHtml(r.email)}</span>
+          ${badge}
+        </div>
+        <div class="student-metrics">
+          <span>單字 <b>${r.total}</b></span>
+          <span>已學會 <b>${r.learned}</b></span>
+          <span>7天正確率 <b>${r.accuracy === null ? '-' : r.accuracy + '%'}</b></span>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 </script>
 
