@@ -230,6 +230,27 @@
 
   .word-front { font-weight: 600; }
   .word-back { color: var(--muted); }
+  .word-example {
+    color: var(--muted);
+    font-size: 13px;
+    font-style: italic;
+    margin-top: 4px;
+  }
+
+  .word-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+
+  .word-row-edit {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    margin: 8px 0;
+  }
   .unit-checkbox-list {
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -348,6 +369,14 @@
     font-size: 17px;
     color: var(--muted);
     margin-top: 16px;
+    display: none;
+  }
+
+  .review-example {
+    font-size: 14px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 10px;
     display: none;
   }
 
@@ -701,6 +730,10 @@
           <textarea id="add-back" placeholder="例如：無所不在的"></textarea>
         </div>
         <div class="field">
+          <label>例句（選填）</label>
+          <textarea id="add-example" placeholder="例如：Smartphones have become ubiquitous."></textarea>
+        </div>
+        <div class="field">
           <label>單元（可複選，不選則為未分類）</label>
           <div class="unit-checkbox-list" id="add-unit-checkboxes"></div>
         </div>
@@ -719,8 +752,8 @@
           <div class="unit-checkbox-list" id="import-unit-checkboxes"></div>
         </div>
         <div class="field">
-          <label>貼上單字，每行一個。支援「單字,解釋」或從 Excel 複製的 Tab 分隔；解釋裡如需要逗號，請用雙引號包住該欄位</label>
-          <textarea id="import-text" rows="8" placeholder="apple,蘋果&#10;banana,香蕉&#10;fruit,&quot;水果，可食用的植物產物&quot;"></textarea>
+          <label>貼上單字，每行一個。格式「單字,解釋」或「單字,解釋,例句」（例句選填），也支援從 Excel 複製的 Tab 分隔；解釋或例句裡如需要逗號，請用雙引號包住該欄位</label>
+          <textarea id="import-text" rows="8" placeholder="apple,蘋果&#10;banana,香蕉,&quot;I ate a banana.&quot;&#10;fruit,&quot;水果，可食用的植物產物&quot;"></textarea>
         </div>
         <button class="btn-primary" id="import-btn">開始匯入</button>
         <div class="toast" id="import-toast"></div>
@@ -973,6 +1006,88 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// ===== 單字列表列（供「新增」分頁跟「單元詳情」共用，含編輯功能）=====
+function wordRowHtml(card, extraHtml = '') {
+  const exampleHtml = card.example ? `<div class="word-example">${escapeHtml(card.example)}</div>` : '';
+  return `
+    <div class="word-row" data-id="${card.id}">
+      <div>
+        <div class="word-front">${escapeHtml(card.front)}</div>
+        <div class="word-back">${escapeHtml(card.back)}</div>
+        ${exampleHtml}
+        ${extraHtml}
+      </div>
+      <div class="word-actions">
+        <button class="link-btn edit-card-btn" data-id="${card.id}">編輯</button>
+        <button class="del-btn" data-id="${card.id}">刪除</button>
+      </div>
+    </div>
+  `;
+}
+
+function wordRowEditHtml(card) {
+  return `
+    <div class="word-row-edit">
+      <div class="field">
+        <label>單字</label>
+        <input type="text" class="edit-front-input" value="${escapeHtml(card.front)}">
+      </div>
+      <div class="field">
+        <label>解釋</label>
+        <textarea class="edit-back-input">${escapeHtml(card.back)}</textarea>
+      </div>
+      <div class="field">
+        <label>例句（選填）</label>
+        <textarea class="edit-example-input">${escapeHtml(card.example || '')}</textarea>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-secondary save-edit-btn" style="flex:1;">儲存</button>
+        <button class="btn-text cancel-edit-btn" style="flex:1;">取消</button>
+      </div>
+      <div class="toast edit-toast"></div>
+    </div>
+  `;
+}
+
+// 點「編輯」把那一列換成表單；儲存/取消都直接呼叫 refreshFn() 重新載入整個列表，
+// 不手動維護編輯前後的 DOM 狀態，跟這個 app 其他地方的作法一致。
+function attachEditHandlers(containerEl, cardsById, refreshFn) {
+  containerEl.querySelectorAll('.edit-card-btn').forEach(btn => {
+    btn.onclick = () => {
+      const card = cardsById[btn.dataset.id];
+      const row = btn.closest('.word-row');
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = wordRowEditHtml(card).trim();
+      const editRow = wrapper.firstElementChild;
+      row.replaceWith(editRow);
+
+      editRow.querySelector('.save-edit-btn').onclick = async () => {
+        const front = editRow.querySelector('.edit-front-input').value.trim();
+        const back = editRow.querySelector('.edit-back-input').value.trim();
+        const example = editRow.querySelector('.edit-example-input').value.trim();
+        const toast = editRow.querySelector('.edit-toast');
+
+        if (!front || !back) {
+          toast.style.color = 'var(--danger)';
+          toast.textContent = '單字和解釋不能空白';
+          return;
+        }
+
+        const { error } = await sb.from('cards').update({ front, back, example: example || null }).eq('id', card.id);
+        if (error) {
+          toast.style.color = 'var(--danger)';
+          toast.textContent = '儲存失敗：' + error.message;
+          return;
+        }
+
+        refreshFn();
+      };
+
+      editRow.querySelector('.cancel-edit-btn').onclick = refreshFn;
+    };
+  });
+}
+
 // ===== 單元管理 =====
 async function loadUnits() {
   const { data: units } = await sb
@@ -1149,15 +1264,11 @@ async function openUnitDetail(unitId) {
     return;
   }
 
-  wordsEl.innerHTML = cards.map(c => `
-    <div class="word-row">
-      <div>
-        <div class="word-front">${escapeHtml(c.front)}</div>
-        <div class="word-back">${escapeHtml(c.back)}</div>
-      </div>
-      <button class="del-btn" data-id="${c.id}">刪除</button>
-    </div>
-  `).join('');
+  wordsEl.innerHTML = cards.map(c => wordRowHtml(c)).join('');
+
+  const cardsById = {};
+  cards.forEach(c => { cardsById[c.id] = c; });
+  attachEditHandlers(wordsEl, cardsById, () => openUnitDetail(unitId));
 
   wordsEl.querySelectorAll('.del-btn').forEach(btn => {
     btn.onclick = async () => {
@@ -1234,6 +1345,7 @@ document.getElementById('delete-unit-btn').onclick = async () => {
 document.getElementById('add-btn').onclick = async () => {
   const front = document.getElementById('add-front').value.trim();
   const back = document.getElementById('add-back').value.trim();
+  const example = document.getElementById('add-example').value.trim();
   const unitIds = getCheckedUnitIds('add-unit-checkboxes');
   const toast = document.getElementById('add-toast');
   toast.textContent = '';
@@ -1246,7 +1358,7 @@ document.getElementById('add-btn').onclick = async () => {
 
   const { data: card, error } = await sb
     .from('cards')
-    .insert({ front, back, user_id: currentUser.id })
+    .insert({ front, back, example: example || null, user_id: currentUser.id })
     .select()
     .single();
 
@@ -1265,6 +1377,7 @@ document.getElementById('add-btn').onclick = async () => {
 
   document.getElementById('add-front').value = '';
   document.getElementById('add-back').value = '';
+  document.getElementById('add-example').value = '';
   document.querySelectorAll('#add-unit-checkboxes input[type="checkbox"]').forEach(cb => cb.checked = false);
   toast.style.color = 'var(--accent)';
   toast.textContent = '已新增「' + front + '」';
@@ -1296,17 +1409,12 @@ async function loadWordList() {
 
   listEl.innerHTML = cards.map(c => {
     const tags = (unitsByCard[c.id] || []).map(name => `<span class="word-unit">${escapeHtml(name)}</span>`).join('');
-    return `
-      <div class="word-row">
-        <div>
-          <div class="word-front">${escapeHtml(c.front)}</div>
-          <div class="word-back">${escapeHtml(c.back)}</div>
-          <div>${tags}</div>
-        </div>
-        <button class="del-btn" data-id="${c.id}">刪除</button>
-      </div>
-    `;
+    return wordRowHtml(c, tags ? `<div>${tags}</div>` : '');
   }).join('');
+
+  const cardsById = {};
+  cards.forEach(c => { cardsById[c.id] = c; });
+  attachEditHandlers(listEl, cardsById, loadWordList);
 
   listEl.querySelectorAll('.del-btn').forEach(btn => {
     btn.onclick = async () => {
@@ -1325,34 +1433,37 @@ function detectDelimiter(text) {
   return tabCount > 0 && tabCount >= commaCount ? '\t' : ',';
 }
 
-// 解析單行：Tab 分隔很單純直接切；逗號分隔要處理「用引號包住的欄位裡也能有逗號」這種 CSV 規則
+// 解析單行成欄位陣列：[單字, 解釋, 例句]，例句可以不存在。
+// Tab 分隔很單純直接切；逗號分隔要處理「用引號包住的欄位裡也能有逗號」這種 CSV 規則
 function parseLine(line, delimiter) {
+  let fields;
+
   if (delimiter === '\t') {
-    const parts = line.split('\t');
-    return [parts[0] || '', parts.slice(1).join('\t') || ''];
-  }
-
-  // 簡易 CSV 解析：支援 "解釋, 含逗號" 這種被雙引號包住的欄位
-  const fields = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-      else { inQuotes = !inQuotes; }
-    } else if (ch === ',' && !inQuotes) {
-      fields.push(cur);
-      cur = '';
-    } else {
-      cur += ch;
+    fields = line.split('\t');
+  } else {
+    // 簡易 CSV 解析：支援 "解釋, 含逗號" 這種被雙引號包住的欄位
+    fields = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      } else if (ch === ',' && !inQuotes) {
+        fields.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
     }
+    fields.push(cur);
   }
-  fields.push(cur);
 
-  const front = fields[0] || '';
-  const back = fields.slice(1).join(',') || '';
-  return [front, back];
+  const front = (fields[0] || '').trim();
+  const back = (fields[1] || '').trim();
+  const example = fields.slice(2).join(delimiter).trim();
+  return { front, back, example };
 }
 
 function parseImportText(text) {
@@ -1362,9 +1473,9 @@ function parseImportText(text) {
   const invalidLines = [];
 
   lines.forEach((line, idx) => {
-    const [front, back] = parseLine(line, delimiter).map(s => s.trim());
+    const { front, back, example } = parseLine(line, delimiter);
     if (front && back) {
-      rows.push({ front, back });
+      rows.push({ front, back, example });
     } else {
       invalidLines.push(idx + 1);
     }
@@ -1458,6 +1569,7 @@ document.getElementById('import-btn').onclick = async () => {
     const batch = rows.slice(i, i + BATCH_SIZE).map(r => ({
       front: r.front,
       back: r.back,
+      example: r.example || null,
       user_id: currentUser.id,
     }));
 
@@ -1608,6 +1720,7 @@ function renderReviewArea() {
       ${learningBadge}
       <div class="review-front">${escapeHtml(card.front)}</div>
       <div class="review-back" id="review-back">${escapeHtml(card.back)}</div>
+      ${card.example ? `<div class="review-example" id="review-example">${escapeHtml(card.example)}</div>` : ''}
       <div class="review-hint" id="review-hint">點卡片看解釋</div>
     </div>
     <div class="answer-buttons hidden" id="answer-buttons">
@@ -1644,6 +1757,8 @@ function flipCurrentCard() {
   const back = document.getElementById('review-back');
   if (!back || back.style.display === 'block') return;
   back.style.display = 'block';
+  const example = document.getElementById('review-example');
+  if (example) example.style.display = 'block';
   document.getElementById('review-hint').classList.add('hidden');
   document.getElementById('answer-buttons').classList.remove('hidden');
 }
