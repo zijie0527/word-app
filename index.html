@@ -643,6 +643,41 @@
     text-align: center;
   }
 
+  .wordbank-picker {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 4px 14px;
+  }
+
+  .wordbank-book-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0 4px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .wordbank-book-title { font-weight: 700; font-size: 14px; }
+
+  .wordbank-unit-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 10px 0 14px;
+  }
+
+  .wordbank-unit-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .wordbank-unit-item input { width: auto; margin: 0; }
+
   .inline-error {
     color: var(--danger);
     font-size: 13px;
@@ -763,9 +798,14 @@
       <div class="card-box">
         <h2>內建課本單字庫</h2>
         <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">
-          一鍵匯入國中英語 B1-B6 全部單字（共 1426 字），會自動依課本單元（1-1 ~ 6-CF，共 37 個）建立單元並分類，已經存在的單字不會重複新增。
+          勾選需要的課本單元再匯入，只會新增勾選範圍內的單字，並自動建立/使用對應單元。已經存在的單字不會重複新增。
         </div>
-        <button class="btn-secondary" id="import-wordbank-btn">匯入 B1-B6 課本單字</button>
+        <div style="display:flex;gap:12px;margin-bottom:8px;">
+          <button class="link-btn" id="wordbank-select-all">全選全部</button>
+          <button class="link-btn" id="wordbank-clear-all">取消全選</button>
+        </div>
+        <div id="wordbank-unit-picker">載入中...</div>
+        <button class="btn-secondary" id="import-wordbank-btn" style="margin-top:12px;">匯入已勾選的單元</button>
         <div class="toast" id="wordbank-toast"></div>
       </div>
     </div>
@@ -998,7 +1038,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
     if (target === 'review') loadDueCards();
     if (target === 'add') loadWordList();
-    if (target === 'import') loadExistingFrontsSet();
+    if (target === 'import') {
+      loadExistingFrontsSet();
+      loadWordbankUnitPicker();
+    }
     if (target === 'units') {
       document.getElementById('unit-detail-view').classList.add('hidden');
       document.getElementById('units-main-view').classList.remove('hidden');
@@ -1670,33 +1713,115 @@ document.getElementById('import-btn').onclick = async () => {
   loadUnits();
 };
 
-// ===== 內建課本單字庫（B1-B6，含分單元）=====
+// ===== 內建課本單字庫（B1-B6，可勾選單元分次匯入）=====
+let wordbankData = null; // 快取，切換分頁不用每次重抓
+let wordbankUnitInfo = []; // [{ unit, book, count }]
+
+async function loadWordbankUnitPicker() {
+  const picker = document.getElementById('wordbank-unit-picker');
+
+  if (!wordbankData) {
+    picker.innerHTML = '載入中...';
+    try {
+      wordbankData = await (await fetch('wordbank_b1_b6.json')).json();
+    } catch (err) {
+      picker.innerHTML = `<p style="color:var(--danger);font-size:13px;">讀取內建單字庫失敗：${escapeHtml(err.message)}</p>`;
+      return;
+    }
+    const counts = {};
+    wordbankData.forEach(r => { counts[r.unit] = (counts[r.unit] || 0) + 1; });
+    wordbankUnitInfo = Object.keys(counts).map(unit => ({
+      unit,
+      book: unit.split('-')[0],
+      count: counts[unit],
+    }));
+  }
+
+  const byBook = {};
+  wordbankUnitInfo.forEach(u => {
+    if (!byBook[u.book]) byBook[u.book] = [];
+    byBook[u.book].push(u);
+  });
+
+  const bookNumbers = Object.keys(byBook).sort((a, b) => Number(a) - Number(b));
+  bookNumbers.forEach(book => {
+    byBook[book].sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true }));
+  });
+
+  picker.innerHTML = `<div class="wordbank-picker">` + bookNumbers.map(book => `
+    <div class="wordbank-book-row">
+      <span class="wordbank-book-title">B${escapeHtml(book)}</span>
+      <button class="link-btn wordbank-select-book" data-book="${escapeHtml(book)}">全選</button>
+    </div>
+    <div class="wordbank-unit-grid" data-book-group="${escapeHtml(book)}">
+      ${byBook[book].map(u => `
+        <label class="wordbank-unit-item">
+          <input type="checkbox" class="wordbank-unit-checkbox" value="${escapeHtml(u.unit)}">
+          <span>${escapeHtml(u.unit)}（${u.count} 字）</span>
+        </label>
+      `).join('')}
+    </div>
+  `).join('') + `</div>`;
+
+  picker.querySelectorAll('.wordbank-select-book').forEach(btn => {
+    btn.onclick = () => {
+      const book = btn.dataset.book;
+      const boxes = picker.querySelectorAll(`.wordbank-unit-grid[data-book-group="${book}"] input[type="checkbox"]`);
+      const allChecked = [...boxes].every(cb => cb.checked);
+      boxes.forEach(cb => { cb.checked = !allChecked; });
+      btn.textContent = allChecked ? '全選' : '取消全選';
+    };
+  });
+}
+
+document.getElementById('wordbank-select-all').onclick = () => {
+  document.querySelectorAll('.wordbank-unit-checkbox').forEach(cb => { cb.checked = true; });
+  document.querySelectorAll('.wordbank-select-book').forEach(btn => { btn.textContent = '取消全選'; });
+};
+
+document.getElementById('wordbank-clear-all').onclick = () => {
+  document.querySelectorAll('.wordbank-unit-checkbox').forEach(cb => { cb.checked = false; });
+  document.querySelectorAll('.wordbank-select-book').forEach(btn => { btn.textContent = '全選'; });
+};
+
 document.getElementById('import-wordbank-btn').onclick = async () => {
   const toast = document.getElementById('wordbank-toast');
   toast.textContent = '';
 
-  if (!confirm('這會嘗試新增 1426 個 B1-B6 課本單字，並自動建立/使用對應的單元（1-1 ~ 6-CF）。已經存在的單字（單字+解釋都一樣）不會重複新增。確定要繼續嗎？')) {
-    return;
-  }
+  const selectedUnits = Array.from(document.querySelectorAll('.wordbank-unit-checkbox:checked')).map(cb => cb.value);
 
-  toast.style.color = 'var(--muted)';
-  toast.textContent = '讀取內建單字庫...';
-
-  let wordbank;
-  try {
-    wordbank = await (await fetch('wordbank_b1_b6.json')).json();
-  } catch (err) {
+  if (selectedUnits.length === 0) {
     toast.style.color = 'var(--danger)';
-    toast.textContent = '讀取內建單字庫失敗：' + err.message;
+    toast.textContent = '請至少勾選一個單元';
     return;
   }
 
-  // 確保每個課本單元都存在，缺的就建立
+  if (!wordbankData) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '單字庫尚未載入完成，請稍後再試';
+    return;
+  }
+
+  const rows = wordbankData.filter(r => selectedUnits.includes(r.unit));
+
+  if (!confirm(`這會嘗試新增 ${rows.length} 個單字（${selectedUnits.length} 個單元：${selectedUnits.join('、')}），並自動建立/使用對應的單元。已經存在的單字（單字+解釋都一樣）不會重複新增。確定要繼續嗎？`)) {
+    return;
+  }
+
+  await importWordbankRows(rows, toast);
+};
+
+// 依單元分組後再各自批次寫入：同一批 insert 回傳的卡片必定同屬一個單元，
+// 不需要依賴資料庫回傳順序跟輸入順序一致，也能正確連結到對的單元。
+async function importWordbankRows(rows, toast) {
+  toast.style.color = 'var(--muted)';
+  toast.textContent = '準備匯入...';
+
   await loadUnits();
   const unitNameToId = {};
   allUnits.forEach(u => { unitNameToId[u.name] = u.id; });
 
-  const neededUnitNames = [...new Set(wordbank.map(r => r.unit))];
+  const neededUnitNames = [...new Set(rows.map(r => r.unit))];
   const missingUnitNames = neededUnitNames.filter(name => !unitNameToId[name]);
 
   if (missingUnitNames.length > 0) {
@@ -1716,18 +1841,16 @@ document.getElementById('import-wordbank-btn').onclick = async () => {
 
   // 查重（單字+解釋都一樣才算重複，避免重複點擊這個按鈕產生重複卡片）
   await loadExistingFrontsSet();
-  const { toInsert: rows, duplicates } = splitDuplicates(wordbank);
+  const { toInsert: toInsertRows, duplicates } = splitDuplicates(rows);
 
-  if (rows.length === 0) {
+  if (toInsertRows.length === 0) {
     toast.style.color = 'var(--warn)';
     toast.textContent = '這些單字都已經在你的單字庫裡了，沒有新增任何卡片';
     return;
   }
 
-  // 依單元分組後再各自批次寫入：同一批 insert 回傳的卡片必定同屬一個單元，
-  // 不需要依賴資料庫回傳順序跟輸入順序一致，也能正確連結到對的單元。
   const rowsByUnit = {};
-  rows.forEach(r => {
+  toInsertRows.forEach(r => {
     if (!rowsByUnit[r.unit]) rowsByUnit[r.unit] = [];
     rowsByUnit[r.unit].push(r);
   });
@@ -1762,7 +1885,7 @@ document.getElementById('import-wordbank-btn').onclick = async () => {
       await sb.from('card_units').insert(links);
     }
 
-    toast.textContent = `匯入中...（${allCardIds.length}/${rows.length}）`;
+    toast.textContent = `匯入中...（${allCardIds.length}/${toInsertRows.length}）`;
   }
 
   if (allCardIds.length > 0) {
@@ -1781,7 +1904,7 @@ document.getElementById('import-wordbank-btn').onclick = async () => {
 
   await loadExistingFrontsSet();
   loadUnits();
-};
+}
 
 
 // ===== 複習邏輯（四選項評分 + 學習中階段本輪重排）=====
