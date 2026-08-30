@@ -922,11 +922,27 @@ async function onLoggedIn(user) {
   await loadDueCards();
 }
 
+// 跨分頁同步：Supabase 的登入 session 存在 localStorage，同一個瀏覽器開兩個分頁時，
+// 其中一個分頁登入/登出會讓另一個分頁的 session 在背景被悄悄換掉，但畫面上的
+// currentUser 不會自動更新，導致還在用舊身份送出請求。這裡監聽 session 是否跟
+// 這個分頁記得的使用者不一致，不一致就重新整理讓畫面跟資料庫身份重新對齊。
+let authBootstrapped = false;
+
+sb.auth.onAuthStateChange((_event, session) => {
+  if (!authBootstrapped) return; // 第一次的事件交給下面的 IIFE 處理，這裡略過避免重複觸發
+  const sessionUserId = session ? session.user.id : null;
+  const knownUserId = currentUser ? currentUser.id : null;
+  if (sessionUserId !== knownUserId) {
+    location.reload();
+  }
+});
+
 (async () => {
   const { data } = await sb.auth.getSession();
   if (data.session) {
     onLoggedIn(data.session.user);
   }
+  authBootstrapped = true;
 })();
 
 // ===== Tabs =====

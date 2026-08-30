@@ -78,6 +78,9 @@ grant execute on function redeem_invite_code(text) to authenticated;
 
 -- ===== 4. get_my_students / get_my_teachers：讀取對方的 email 顯示用 =====
 -- auth.users 本身不開放給前端直接查，用這兩個函式各自回傳「我看得到的人」的 email。
+-- auth.users.email 實際型態是 character varying(255)，RETURNS TABLE 宣告 text
+-- 如果沒有明確 cast 會噴「structure of query does not match function result type」，
+-- 所以這裡都用 u.email::text。
 create or replace function get_my_students()
 returns table(student_id uuid, email text, linked_at timestamptz)
 language plpgsql
@@ -86,7 +89,7 @@ set search_path = public
 as $$
 begin
   return query
-    select tl.student_id, u.email, tl.created_at
+    select tl.student_id, u.email::text, tl.created_at
     from teacher_links tl
     join auth.users u on u.id = tl.student_id
     where tl.teacher_id = auth.uid();
@@ -103,7 +106,7 @@ set search_path = public
 as $$
 begin
   return query
-    select tl.teacher_id, u.email, tl.created_at
+    select tl.teacher_id, u.email::text, tl.created_at
     from teacher_links tl
     join auth.users u on u.id = tl.teacher_id
     where tl.student_id = auth.uid();
