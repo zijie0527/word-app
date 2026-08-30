@@ -895,7 +895,7 @@ let dueCards = [];
 let currentCardIndex = 0;
 let allUnits = [];
 let reviewUnitFilter = 'all';
-let existingFrontsSet = new Set();
+let existingCardKeysSet = new Set();
 
 // ===== DOM refs =====
 const authScreen = document.getElementById('auth-screen');
@@ -1491,17 +1491,23 @@ function normalizeFront(s) {
   return s.trim().toLowerCase();
 }
 
+// 查重的 key 是「單字+解釋」而不是只看單字：同一個字如果意思不同（一字多義），
+// 應該當成不同的卡片保留，只有「單字和解釋都一樣」才視為真正的重複匯入。
+function cardDedupKey(front, back) {
+  return normalizeFront(front) + '||' + (back || '').trim().toLowerCase();
+}
+
 async function loadExistingFrontsSet() {
-  const { data } = await sb.from('cards').select('front');
-  existingFrontsSet = new Set((data || []).map(c => normalizeFront(c.front)));
+  const { data } = await sb.from('cards').select('front, back');
+  existingCardKeysSet = new Set((data || []).map(c => cardDedupKey(c.front, c.back)));
 }
 
 function splitDuplicates(rows) {
-  const seen = new Set(existingFrontsSet);
+  const seen = new Set(existingCardKeysSet);
   const toInsert = [];
   const duplicates = [];
   rows.forEach(r => {
-    const key = normalizeFront(r.front);
+    const key = cardDedupKey(r.front, r.back);
     if (seen.has(key)) {
       duplicates.push(r);
     } else {
