@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>背單字</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3a5a40">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="背單字">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
@@ -717,6 +723,12 @@
 const SUPABASE_URL = "https://tzfiososqtdbuzcfaofu.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YYGVivSiKmRYHXwfwSEfrw_AqiFbw64";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.error('SW 註冊失敗：', err));
+  });
+}
 
 // ===== 時區工具 =====
 // toISOString() 是 UTC 時間，台灣是 UTC+8，凌晨 0~8 點用 toISOString() 取日期
