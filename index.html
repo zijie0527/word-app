@@ -744,6 +744,7 @@ let dueCards = [];
 let currentCardIndex = 0;
 let allUnits = [];
 let reviewUnitFilter = 'all';
+let existingFrontsSet = new Set();
 
 // ===== DOM refs =====
 const authScreen = document.getElementById('auth-screen');
@@ -821,6 +822,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     });
     if (target === 'review') loadDueCards();
     if (target === 'add') loadWordList();
+    if (target === 'import') loadExistingFrontsSet();
     if (target === 'units') {
       document.getElementById('unit-detail-view').classList.add('hidden');
       document.getElementById('units-main-view').classList.remove('hidden');
@@ -1234,6 +1236,34 @@ function parseImportText(text) {
   return { rows, invalidLines, delimiter };
 }
 
+// ===== 匯入查重 =====
+// 用目前使用者已有的單字（front，去除大小寫與前後空白差異）建一個集合，
+// 匯入時同時擋掉「跟現有卡片重複」和「同一次貼上內容裡自己重複」的行。
+function normalizeFront(s) {
+  return s.trim().toLowerCase();
+}
+
+async function loadExistingFrontsSet() {
+  const { data } = await sb.from('cards').select('front');
+  existingFrontsSet = new Set((data || []).map(c => normalizeFront(c.front)));
+}
+
+function splitDuplicates(rows) {
+  const seen = new Set(existingFrontsSet);
+  const toInsert = [];
+  const duplicates = [];
+  rows.forEach(r => {
+    const key = normalizeFront(r.front);
+    if (seen.has(key)) {
+      duplicates.push(r);
+    } else {
+      seen.add(key);
+      toInsert.push(r);
+    }
+  });
+  return { toInsert, duplicates };
+}
+
 document.getElementById('import-text').addEventListener('input', (e) => {
   const preview = document.getElementById('import-preview');
   const text = e.target.value;
@@ -1242,8 +1272,12 @@ document.getElementById('import-text').addEventListener('input', (e) => {
     return;
   }
   const { rows, invalidLines, delimiter } = parseImportText(text);
+  const { toInsert, duplicates } = splitDuplicates(rows);
   const delimiterLabel = delimiter === '\t' ? 'Tab' : '逗號';
-  let msg = `偵測到分隔符：${delimiterLabel}，可匯入 ${rows.length} 筆`;
+  let msg = `偵測到分隔符：${delimiterLabel}，可匯入 ${toInsert.length} 筆`;
+  if (duplicates.length > 0) {
+    msg += `，${duplicates.length} 筆與現有單字重複會被跳過`;
+  }
   if (invalidLines.length > 0) {
     msg += `，第 ${invalidLines.slice(0, 5).join('、')}${invalidLines.length > 5 ? ' 等' : ''} 行格式有問題會被跳過`;
   }
@@ -1256,11 +1290,21 @@ document.getElementById('import-btn').onclick = async () => {
   const toast = document.getElementById('import-toast');
   toast.textContent = '';
 
-  const { rows, invalidLines } = parseImportText(text);
+  const { rows: parsedRows, invalidLines } = parseImportText(text);
 
-  if (rows.length === 0) {
+  if (parsedRows.length === 0) {
     toast.style.color = 'var(--danger)';
     toast.textContent = '沒有偵測到有效的資料，請確認格式是「單字,解釋」或「單字[Tab]解釋」';
+    return;
+  }
+
+  // 匯入當下重新抓一次現有單字，避免用到分頁切換時的舊快取
+  await loadExistingFrontsSet();
+  const { toInsert: rows, duplicates } = splitDuplicates(parsedRows);
+
+  if (rows.length === 0) {
+    toast.style.color = 'var(--warn)';
+    toast.textContent = `這 ${parsedRows.length} 筆都跟現有單字重複，沒有新增任何卡片`;
     return;
   }
 
@@ -1320,6 +1364,10 @@ document.getElementById('import-btn').onclick = async () => {
   }
 
   let resultMsg = `完成！成功匯入 ${insertedCards.length} 個單字`;
+  if (duplicates.length > 0) {
+    const sample = duplicates.slice(0, 5).map(d => d.front).join('、');
+    resultMsg += `，${duplicates.length} 筆重複已跳過（例如：${sample}${duplicates.length > 5 ? ' 等' : ''}）`;
+  }
   if (invalidLines.length > 0) {
     resultMsg += `，${invalidLines.length} 行格式錯誤已跳過`;
   }
@@ -1327,7 +1375,7 @@ document.getElementById('import-btn').onclick = async () => {
     resultMsg += `，${failedCount} 筆寫入失敗`;
   }
 
-  toast.style.color = (failedCount > 0 || invalidLines.length > 0) ? 'var(--warn)' : 'var(--accent)';
+  toast.style.color = (failedCount > 0 || invalidLines.length > 0 || duplicates.length > 0) ? 'var(--warn)' : 'var(--accent)';
   toast.textContent = resultMsg;
 
   if (failReasons.length > 0) {
@@ -1336,6 +1384,7 @@ document.getElementById('import-btn').onclick = async () => {
 
   document.getElementById('import-text').value = '';
   document.getElementById('import-preview').textContent = '';
+  await loadExistingFrontsSet();
   loadUnits();
 };
 
