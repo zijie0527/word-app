@@ -1,0 +1,1816 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>背單字</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --ink: #1c1b1a;
+    --paper: #faf8f5;
+    --card: #ffffff;
+    --line: #e4e0d8;
+    --accent: #3a5a40;
+    --accent-soft: #dde8dc;
+    --danger: #a5402d;
+    --danger-soft: #f3ddd6;
+    --warn: #a3762f;
+    --warn-soft: #f2e6d3;
+    --blue: #35618a;
+    --blue-soft: #dce8f0;
+    --muted: #8a8478;
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+
+  .wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 24px 20px 80px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+
+  h2 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0 0 12px;
+  }
+
+  .sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 28px;
+  }
+
+  /* ---------- Auth ---------- */
+  .auth-box {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    margin-top: 60px;
+  }
+
+  .field {
+    margin-bottom: 14px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  input, select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 15px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: inherit;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    width: 100%;
+    padding: 13px;
+    background: var(--accent);
+    color: white;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+
+  .btn-primary:active { opacity: 0.85; }
+
+  .btn-secondary {
+    width: 100%;
+    padding: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .btn-text {
+    background: none;
+    color: var(--accent);
+    font-size: 14px;
+    padding: 10px;
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .error-msg {
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 10px;
+  }
+
+  /* ---------- App shell ---------- */
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+
+  .logout {
+    background: none;
+    color: var(--muted);
+    font-size: 13px;
+    text-decoration: underline;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+
+  .tab {
+    background: none;
+    padding: 10px 6px;
+    font-size: 14px;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .tab.active {
+    color: var(--ink);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ---------- Add card ---------- */
+  .card-box {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 15px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: inherit;
+    resize: vertical;
+    min-height: 44px;
+  }
+
+  .toast {
+    text-align: center;
+    color: var(--accent);
+    font-size: 14px;
+    margin-top: 14px;
+    min-height: 18px;
+  }
+
+  .word-list {
+    margin-top: 20px;
+  }
+
+  .word-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+  }
+
+  .word-row:last-child { border-bottom: none; }
+
+  .word-front { font-weight: 600; }
+  .word-back { color: var(--muted); }
+  .unit-checkbox-list {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    max-height: 160px;
+    overflow-y: auto;
+    background: var(--paper);
+  }
+
+  .unit-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .unit-checkbox-item:last-child { border-bottom: none; }
+
+  .unit-checkbox-item input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+  }
+
+  .unit-checkbox-empty {
+    padding: 14px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .word-unit {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 8px;
+    border-radius: 6px;
+    margin-top: 4px;
+    margin-right: 4px;
+  }
+
+  .del-btn {
+    background: none;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 4px 8px;
+    flex-shrink: 0;
+  }
+
+  /* ---------- Units ---------- */
+  .unit-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .unit-row:last-child { border-bottom: none; }
+  .unit-name { font-weight: 600; font-size: 15px; }
+  .unit-count { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* ---------- Review ---------- */
+  .stat-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    flex: 1;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+  }
+
+  .stat-num {
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .unit-filter {
+    margin-bottom: 16px;
+  }
+
+  .review-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    min-height: 260px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .review-front {
+    font-size: 28px;
+    font-weight: 700;
+  }
+
+  .review-back {
+    font-size: 17px;
+    color: var(--muted);
+    margin-top: 16px;
+    display: none;
+  }
+
+  .review-hint {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 24px;
+  }
+
+  .answer-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .ans-btn {
+    flex: 1;
+    padding: 12px 4px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .ans-btn .interval-preview {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.75;
+  }
+
+  .ans-again { background: var(--danger-soft); color: var(--danger); }
+  .ans-hard { background: var(--warn-soft); color: var(--warn); }
+  .ans-good { background: var(--accent-soft); color: var(--accent); }
+  .ans-easy { background: var(--blue-soft); color: var(--blue); }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+
+  .empty-state .big {
+    font-size: 40px;
+    margin-bottom: 12px;
+  }
+
+  /* ---------- Import ---------- */
+  .import-preview {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ---------- Stats ---------- */
+  .chart-box {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 120px;
+    margin-top: 12px;
+  }
+
+  .bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+  }
+
+  .bar {
+    width: 100%;
+    background: var(--accent);
+    border-radius: 4px 4px 0 0;
+    min-height: 2px;
+  }
+
+  .bar-label {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 6px;
+    white-space: nowrap;
+  }
+
+  .accuracy-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .accuracy-stat {
+    flex: 1;
+    text-align: center;
+  }
+
+  .accuracy-num {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .accuracy-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .grade-bar-row {
+    display: flex;
+    height: 24px;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 14px;
+  }
+
+  .grade-seg {
+    height: 100%;
+  }
+
+  .grade-legend {
+    display: flex;
+    gap: 14px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .grade-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .grade-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .learning-badge {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--blue);
+    background: var(--blue-soft);
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+
+  .unit-progress-row {
+    margin-bottom: 14px;
+  }
+
+  .unit-progress-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .progress-track {
+    height: 8px;
+    background: var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- AUTH SCREEN -->
+  <div id="auth-screen">
+    <h1>背單字</h1>
+    <p class="sub">間隔重複複習，跨裝置同步</p>
+    <div class="auth-box">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="auth-email" placeholder="you@example.com">
+      </div>
+      <div class="field">
+        <label>密碼</label>
+        <input type="password" id="auth-password" placeholder="至少 6 碼">
+      </div>
+      <button class="btn-primary" id="login-btn">登入</button>
+      <button class="btn-text" id="signup-btn">還沒有帳號？註冊</button>
+      <div class="error-msg" id="auth-error"></div>
+    </div>
+  </div>
+
+  <!-- APP SCREEN -->
+  <div id="app-screen" class="hidden">
+    <div class="topbar">
+      <div>
+        <h1 style="margin-bottom:0">背單字</h1>
+      </div>
+      <button class="logout" id="logout-btn">登出</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="review">複習</button>
+      <button class="tab" data-tab="add">新增</button>
+      <button class="tab" data-tab="import">匯入</button>
+      <button class="tab" data-tab="units">單元</button>
+      <button class="tab" data-tab="stats">統計</button>
+    </div>
+
+    <!-- REVIEW TAB -->
+    <div id="tab-review">
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-num" id="stat-due">0</div>
+          <div class="stat-label">今天待複習</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="stat-total">0</div>
+          <div class="stat-label">總單字數</div>
+        </div>
+      </div>
+
+      <div class="unit-filter">
+        <select id="review-unit-select">
+          <option value="all">全部單元</option>
+        </select>
+      </div>
+
+      <div id="review-area"></div>
+    </div>
+
+    <!-- ADD TAB -->
+    <div id="tab-add" class="hidden">
+      <div class="card-box">
+        <div class="field">
+          <label>單字（正面）</label>
+          <input type="text" id="add-front" placeholder="例如：ubiquitous">
+        </div>
+        <div class="field">
+          <label>解釋（背面）</label>
+          <textarea id="add-back" placeholder="例如：無所不在的"></textarea>
+        </div>
+        <div class="field">
+          <label>單元（可複選，不選則為未分類）</label>
+          <div class="unit-checkbox-list" id="add-unit-checkboxes"></div>
+        </div>
+        <button class="btn-primary" id="add-btn">新增這張卡</button>
+        <div class="toast" id="add-toast"></div>
+      </div>
+
+      <div class="word-list" id="word-list"></div>
+    </div>
+
+    <!-- IMPORT TAB -->
+    <div id="tab-import" class="hidden">
+      <div class="card-box">
+        <div class="field">
+          <label>要匯入到哪些單元（可複選，不選則為未分類）</label>
+          <div class="unit-checkbox-list" id="import-unit-checkboxes"></div>
+        </div>
+        <div class="field">
+          <label>貼上單字，每行一個。支援「單字,解釋」或從 Excel 複製的 Tab 分隔；解釋裡如需要逗號，請用雙引號包住該欄位</label>
+          <textarea id="import-text" rows="8" placeholder="apple,蘋果&#10;banana,香蕉&#10;fruit,&quot;水果，可食用的植物產物&quot;"></textarea>
+        </div>
+        <button class="btn-primary" id="import-btn">開始匯入</button>
+        <div class="toast" id="import-toast"></div>
+        <div class="import-preview" id="import-preview"></div>
+      </div>
+    </div>
+
+    <!-- UNITS TAB -->
+    <div id="tab-units" class="hidden">
+      <div id="units-main-view">
+        <div class="card-box">
+          <div class="field">
+            <label>新增單元名稱</label>
+            <input type="text" id="new-unit-name" placeholder="例如：國中英文 Unit 1">
+          </div>
+          <button class="btn-primary" id="create-unit-btn">建立單元</button>
+          <div class="toast" id="unit-toast"></div>
+        </div>
+        <div class="card-box" id="unit-list-box">
+          <h2>我的單元</h2>
+          <div id="unit-list"></div>
+        </div>
+      </div>
+
+      <!-- 單元詳情（點某個單元後顯示） -->
+      <div id="unit-detail-view" class="hidden">
+        <button class="btn-text" id="back-to-units-btn" style="text-align:left;padding-left:0;">← 返回單元列表</button>
+        <div class="card-box" id="rename-unit-box">
+          <div class="field" id="rename-unit-field">
+            <label>單元名稱</label>
+            <input type="text" id="rename-unit-input">
+          </div>
+          <button class="btn-secondary" id="rename-unit-btn">儲存名稱</button>
+          <div class="toast" id="rename-toast"></div>
+        </div>
+        <div class="card-box">
+          <h2 id="unit-detail-title">單字列表</h2>
+          <div class="word-list" id="unit-detail-words"></div>
+        </div>
+        <div class="card-box" id="delete-unit-box">
+          <button class="btn-primary" id="delete-unit-btn" style="background:var(--danger);">刪除這個單元</button>
+          <div style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center;">只會解除單字與此單元的關聯，單字本身及其他單元的分類不受影響</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATS TAB -->
+    <div id="tab-stats" class="hidden">
+      <div class="unit-filter">
+        <select id="stats-unit-select">
+          <option value="all">全部單元</option>
+        </select>
+      </div>
+
+      <div class="chart-box">
+        <h2>近 7 天正確率</h2>
+        <div class="accuracy-row">
+          <div class="accuracy-stat">
+            <div class="accuracy-num" id="accuracy-pct">-</div>
+            <div class="accuracy-label">正確率</div>
+          </div>
+          <div class="accuracy-stat">
+            <div class="accuracy-num" id="accuracy-total">-</div>
+            <div class="accuracy-label">總複習次數</div>
+          </div>
+        </div>
+        <div class="grade-bar-row" id="grade-bar-row"></div>
+        <div class="grade-legend">
+          <div class="grade-legend-item"><span class="grade-legend-dot" style="background:var(--danger);"></span>重來</div>
+          <div class="grade-legend-item"><span class="grade-legend-dot" style="background:var(--warn);"></span>困難</div>
+          <div class="grade-legend-item"><span class="grade-legend-dot" style="background:var(--accent);"></span>良好</div>
+          <div class="grade-legend-item"><span class="grade-legend-dot" style="background:var(--blue);"></span>簡單</div>
+        </div>
+      </div>
+      <div class="chart-box">
+        <h2>近 7 天複習量</h2>
+        <div class="bar-chart" id="daily-chart"></div>
+      </div>
+      <div class="chart-box">
+        <h2>各單元進度</h2>
+        <div id="unit-progress-list"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ===== Supabase 設定 =====
+const SUPABASE_URL = "https://tzfiososqtdbuzcfaofu.supabase.co";
+const SUPABASE_KEY = "sb_publishable_YYGVivSiKmRYHXwfwSEfrw_AqiFbw64";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ===== 時區工具 =====
+// toISOString() 是 UTC 時間，台灣是 UTC+8，凌晨 0~8 點用 toISOString() 取日期
+// 會拿到「前一天」的日期，導致待複習清單、每日統計都算錯天。
+// 這裡統一改用 Intl API 以 Asia/Taipei 時區算出「今天」的日期字串（YYYY-MM-DD）。
+function taipeiDateStr(date = new Date()) {
+  // en-CA 語系的格式剛好就是 YYYY-MM-DD，用它最省事
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(date);
+}
+
+let currentUser = null;
+let dueCards = [];
+let currentCardIndex = 0;
+let allUnits = [];
+let reviewUnitFilter = 'all';
+
+// ===== DOM refs =====
+const authScreen = document.getElementById('auth-screen');
+const appScreen = document.getElementById('app-screen');
+const authError = document.getElementById('auth-error');
+
+// ===== Auth =====
+document.getElementById('login-btn').onclick = async () => {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  authError.style.color = 'var(--danger)';
+  authError.textContent = '';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { authError.textContent = error.message; return; }
+  onLoggedIn(data.user);
+};
+
+document.getElementById('signup-btn').onclick = async () => {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  authError.textContent = '';
+  if (!email || password.length < 6) {
+    authError.textContent = '請輸入 Email 並設定至少 6 碼密碼';
+    return;
+  }
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) {
+    authError.style.color = 'var(--danger)';
+    authError.textContent = error.message;
+    return;
+  }
+
+  // 關鍵：用 data.session 判斷，不是 data.user——
+  // 如果 Supabase 開了 Email 驗證，data.user 通常還是有值，但 session 會是 null，
+  // 代表帳號建立了但還不能登入，要先去收信驗證。
+  if (data.session) {
+    onLoggedIn(data.session.user);
+  } else {
+    authError.style.color = 'var(--accent)';
+    authError.textContent = '註冊成功！請前往你的信箱收取驗證信，完成驗證後再回來登入。';
+  }
+};
+
+document.getElementById('logout-btn').onclick = async () => {
+  await sb.auth.signOut();
+  currentUser = null;
+  appScreen.classList.add('hidden');
+  authScreen.classList.remove('hidden');
+};
+
+async function onLoggedIn(user) {
+  currentUser = user;
+  authScreen.classList.add('hidden');
+  appScreen.classList.remove('hidden');
+  await loadUnits();
+  await loadWordList();
+  await loadDueCards();
+}
+
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) {
+    onLoggedIn(data.session.user);
+  }
+})();
+
+// ===== Tabs =====
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.tab;
+    ['review', 'add', 'import', 'units', 'stats'].forEach(name => {
+      document.getElementById('tab-' + name).classList.toggle('hidden', name !== target);
+    });
+    if (target === 'review') loadDueCards();
+    if (target === 'add') loadWordList();
+    if (target === 'units') {
+      document.getElementById('unit-detail-view').classList.add('hidden');
+      document.getElementById('units-main-view').classList.remove('hidden');
+      loadUnits();
+    }
+    if (target === 'stats') loadStats();
+  };
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== 單元管理 =====
+async function loadUnits() {
+  const { data: units } = await sb
+    .from('units')
+    .select('*')
+    .order('created_at', { ascending: true });
+
+  allUnits = units || [];
+  populateUnitSelects();
+  renderUnitList();
+}
+
+function populateUnitSelects() {
+  const options = allUnits.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+
+  // 新增/匯入用 checkbox 列表（支援複選多個單元）
+  renderUnitCheckboxes('add-unit-checkboxes');
+  renderUnitCheckboxes('import-unit-checkboxes');
+
+  // 複習篩選、統計篩選維持單選下拉，但加入「未分類」選項
+  const reviewSel = document.getElementById('review-unit-select');
+  const reviewCurrentVal = reviewSel.value;
+  reviewSel.innerHTML = '<option value="all">全部單元</option><option value="none">未分類</option>' + options;
+  reviewSel.value = reviewCurrentVal || 'all';
+
+  const statsSel = document.getElementById('stats-unit-select');
+  const statsCurrentVal = statsSel.value;
+  statsSel.innerHTML = '<option value="all">全部單元</option><option value="none">未分類</option>' + options;
+  statsSel.value = statsCurrentVal || 'all';
+}
+
+function renderUnitCheckboxes(containerId) {
+  const container = document.getElementById(containerId);
+  if (allUnits.length === 0) {
+    container.innerHTML = '<div class="unit-checkbox-empty">還沒有單元，可以先到「單元」分頁建立</div>';
+    return;
+  }
+  container.innerHTML = allUnits.map(u => `
+    <label class="unit-checkbox-item">
+      <input type="checkbox" value="${u.id}">
+      <span>${escapeHtml(u.name)}</span>
+    </label>
+  `).join('');
+}
+
+function getCheckedUnitIds(containerId) {
+  const container = document.getElementById(containerId);
+  return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+}
+
+document.getElementById('create-unit-btn').onclick = async () => {
+  const name = document.getElementById('new-unit-name').value.trim();
+  const toast = document.getElementById('unit-toast');
+  toast.textContent = '';
+
+  if (!name) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '請輸入單元名稱';
+    return;
+  }
+
+  const { error } = await sb.from('units').insert({ name, user_id: currentUser.id });
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '建立失敗：' + error.message;
+    return;
+  }
+
+  document.getElementById('new-unit-name').value = '';
+  toast.style.color = 'var(--accent)';
+  toast.textContent = '已建立「' + name + '」';
+  loadUnits();
+};
+
+async function renderUnitList() {
+  const listEl = document.getElementById('unit-list');
+
+  const { data: allCards } = await sb.from('cards').select('id');
+  const { data: links } = await sb.from('card_units').select('card_id, unit_id');
+
+  const counts = {};
+  (links || []).forEach(l => {
+    counts[l.unit_id] = (counts[l.unit_id] || 0) + 1;
+  });
+
+  // 未分類 = 完全沒有出現在 card_units 裡的卡
+  const linkedCardIds = new Set((links || []).map(l => l.card_id));
+  const uncategorizedCount = (allCards || []).filter(c => !linkedCardIds.has(c.id)).length;
+
+  let html = '';
+  if (allUnits.length === 0) {
+    html += '<p style="color:var(--muted);font-size:14px;">還沒有單元，先在上面新增一個吧</p>';
+  } else {
+    html += allUnits.map(u => `
+      <div class="unit-row">
+        <div class="unit-clickable" data-id="${u.id}" style="cursor:pointer;flex:1;">
+          <div class="unit-name">${escapeHtml(u.name)}</div>
+          <div class="unit-count">${counts[u.id] || 0} 個單字</div>
+        </div>
+        <button class="del-btn" data-id="${u.id}">刪除</button>
+      </div>
+    `).join('');
+  }
+
+  // 未分類永遠顯示在最下面，沒有刪除按鈕
+  html += `
+    <div class="unit-row">
+      <div class="unit-clickable" data-id="none" style="cursor:pointer;flex:1;">
+        <div class="unit-name">未分類</div>
+        <div class="unit-count">${uncategorizedCount} 個單字</div>
+      </div>
+    </div>
+  `;
+
+  listEl.innerHTML = html;
+
+  listEl.querySelectorAll('.unit-clickable').forEach(el => {
+    el.onclick = () => openUnitDetail(el.dataset.id);
+  });
+
+  listEl.querySelectorAll('.del-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('刪除單元只會解除卡片與此單元的關聯；卡片及其在其他單元中的分類不受影響。確定嗎？')) return;
+      await sb.from('units').delete().eq('id', btn.dataset.id);
+      loadUnits();
+    };
+  });
+}
+
+// ===== 單元詳情（改名 + 查看單字）=====
+// currentDetailUnitId 可能是真正的單元 id，也可能是特殊值 'none'（代表未分類視圖）
+let currentDetailUnitId = null;
+
+async function openUnitDetail(unitId) {
+  currentDetailUnitId = unitId;
+
+  document.getElementById('units-main-view').classList.add('hidden');
+  document.getElementById('unit-detail-view').classList.remove('hidden');
+  document.getElementById('rename-toast').textContent = '';
+
+  const isUncategorized = unitId === 'none';
+
+  // 未分類沒有名稱可改、也不能被刪除，把改名/刪除區塊隱藏
+  document.getElementById('rename-unit-box').classList.toggle('hidden', isUncategorized);
+  document.getElementById('delete-unit-box').classList.toggle('hidden', isUncategorized);
+
+  let cards;
+  if (isUncategorized) {
+    document.getElementById('unit-detail-title').textContent = '未分類的單字';
+    const { data: allCards } = await sb.from('cards').select('*').order('created_at', { ascending: false });
+    const { data: links } = await sb.from('card_units').select('card_id');
+    const linkedIds = new Set((links || []).map(l => l.card_id));
+    cards = (allCards || []).filter(c => !linkedIds.has(c.id));
+  } else {
+    const unit = allUnits.find(u => u.id === unitId);
+    if (!unit) return;
+    document.getElementById('rename-unit-input').value = unit.name;
+    document.getElementById('unit-detail-title').textContent = unit.name + ' 的單字';
+
+    const { data: links } = await sb.from('card_units').select('card_id').eq('unit_id', unitId);
+    const cardIds = (links || []).map(l => l.card_id);
+    if (cardIds.length === 0) {
+      cards = [];
+    } else {
+      const { data } = await sb.from('cards').select('*').in('id', cardIds).order('created_at', { ascending: false });
+      cards = data || [];
+    }
+  }
+
+  const wordsEl = document.getElementById('unit-detail-words');
+  if (!cards || cards.length === 0) {
+    wordsEl.innerHTML = '<p style="color:var(--muted);font-size:14px;">這裡還沒有單字</p>';
+    return;
+  }
+
+  wordsEl.innerHTML = cards.map(c => `
+    <div class="word-row">
+      <div>
+        <div class="word-front">${escapeHtml(c.front)}</div>
+        <div class="word-back">${escapeHtml(c.back)}</div>
+      </div>
+      <button class="del-btn" data-id="${c.id}">刪除</button>
+    </div>
+  `).join('');
+
+  wordsEl.querySelectorAll('.del-btn').forEach(btn => {
+    btn.onclick = async () => {
+      await sb.from('cards').delete().eq('id', btn.dataset.id);
+      openUnitDetail(unitId);
+    };
+  });
+}
+
+document.getElementById('back-to-units-btn').onclick = () => {
+  document.getElementById('unit-detail-view').classList.add('hidden');
+  document.getElementById('units-main-view').classList.remove('hidden');
+  currentDetailUnitId = null;
+  loadUnits();
+};
+
+document.getElementById('rename-unit-btn').onclick = async () => {
+  const newName = document.getElementById('rename-unit-input').value.trim();
+  const toast = document.getElementById('rename-toast');
+  toast.textContent = '';
+
+  if (!newName) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '名稱不能空白';
+    return;
+  }
+
+  const { error } = await sb
+    .from('units')
+    .update({ name: newName })
+    .eq('id', currentDetailUnitId);
+
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '儲存失敗：' + error.message;
+    return;
+  }
+
+  toast.style.color = 'var(--accent)';
+  toast.textContent = '已儲存';
+  document.getElementById('unit-detail-title').textContent = newName + ' 的單字';
+
+  // 同步更新本地的 allUnits，避免要重新整理才看到新名稱
+  const unit = allUnits.find(u => u.id === currentDetailUnitId);
+  if (unit) unit.name = newName;
+  populateUnitSelects();
+};
+
+document.getElementById('delete-unit-btn').onclick = async () => {
+  const unit = allUnits.find(u => u.id === currentDetailUnitId);
+  const unitName = unit ? unit.name : '這個單元';
+
+  if (!confirm(`確定要刪除「${unitName}」嗎？\n\n單字本身不會被刪除，會變成未分類。這個動作無法復原。`)) {
+    return;
+  }
+
+  const { error } = await sb.from('units').delete().eq('id', currentDetailUnitId);
+
+  if (error) {
+    alert('刪除失敗：' + error.message);
+    return;
+  }
+
+  // 刪除成功，回到單元列表主畫面
+  document.getElementById('unit-detail-view').classList.add('hidden');
+  document.getElementById('units-main-view').classList.remove('hidden');
+  currentDetailUnitId = null;
+  loadUnits();
+};
+
+// ===== 新增單字 =====
+document.getElementById('add-btn').onclick = async () => {
+  const front = document.getElementById('add-front').value.trim();
+  const back = document.getElementById('add-back').value.trim();
+  const unitIds = getCheckedUnitIds('add-unit-checkboxes');
+  const toast = document.getElementById('add-toast');
+  toast.textContent = '';
+
+  if (!front || !back) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '請填寫單字和解釋';
+    return;
+  }
+
+  const { data: card, error } = await sb
+    .from('cards')
+    .insert({ front, back, user_id: currentUser.id })
+    .select()
+    .single();
+
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '新增失敗：' + error.message;
+    return;
+  }
+
+  await sb.from('review_state').insert({ card_id: card.id });
+
+  if (unitIds.length > 0) {
+    const links = unitIds.map(uid => ({ card_id: card.id, unit_id: uid }));
+    await sb.from('card_units').insert(links);
+  }
+
+  document.getElementById('add-front').value = '';
+  document.getElementById('add-back').value = '';
+  document.querySelectorAll('#add-unit-checkboxes input[type="checkbox"]').forEach(cb => cb.checked = false);
+  toast.style.color = 'var(--accent)';
+  toast.textContent = '已新增「' + front + '」';
+
+  loadWordList();
+};
+
+async function loadWordList() {
+  const { data: cards } = await sb
+    .from('cards')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  document.getElementById('stat-total').textContent = cards ? cards.length : 0;
+
+  const listEl = document.getElementById('word-list');
+  if (!cards || cards.length === 0) {
+    listEl.innerHTML = '';
+    return;
+  }
+
+  // 一次查出所有卡的單元關聯，避免每張卡各查一次（省 request 數）
+  const { data: links } = await sb.from('card_units').select('card_id, units(id, name)');
+  const unitsByCard = {};
+  (links || []).forEach(l => {
+    if (!unitsByCard[l.card_id]) unitsByCard[l.card_id] = [];
+    if (l.units) unitsByCard[l.card_id].push(l.units.name);
+  });
+
+  listEl.innerHTML = cards.map(c => {
+    const tags = (unitsByCard[c.id] || []).map(name => `<span class="word-unit">${escapeHtml(name)}</span>`).join('');
+    return `
+      <div class="word-row">
+        <div>
+          <div class="word-front">${escapeHtml(c.front)}</div>
+          <div class="word-back">${escapeHtml(c.back)}</div>
+          <div>${tags}</div>
+        </div>
+        <button class="del-btn" data-id="${c.id}">刪除</button>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.del-btn').forEach(btn => {
+    btn.onclick = async () => {
+      await sb.from('cards').delete().eq('id', btn.dataset.id);
+      loadWordList();
+      loadDueCards();
+    };
+  });
+}
+
+// ===== 匯入 =====
+// 自動偵測分隔符：如果整份文字裡 Tab 比逗號多，判斷是 Tab 分隔（例如從 Excel 複製），否則用逗號
+function detectDelimiter(text) {
+  const tabCount = (text.match(/\t/g) || []).length;
+  const commaCount = (text.match(/,/g) || []).length;
+  return tabCount > 0 && tabCount >= commaCount ? '\t' : ',';
+}
+
+// 解析單行：Tab 分隔很單純直接切；逗號分隔要處理「用引號包住的欄位裡也能有逗號」這種 CSV 規則
+function parseLine(line, delimiter) {
+  if (delimiter === '\t') {
+    const parts = line.split('\t');
+    return [parts[0] || '', parts.slice(1).join('\t') || ''];
+  }
+
+  // 簡易 CSV 解析：支援 "解釋, 含逗號" 這種被雙引號包住的欄位
+  const fields = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  fields.push(cur);
+
+  const front = fields[0] || '';
+  const back = fields.slice(1).join(',') || '';
+  return [front, back];
+}
+
+function parseImportText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+  const delimiter = detectDelimiter(text);
+  const rows = [];
+  const invalidLines = [];
+
+  lines.forEach((line, idx) => {
+    const [front, back] = parseLine(line, delimiter).map(s => s.trim());
+    if (front && back) {
+      rows.push({ front, back });
+    } else {
+      invalidLines.push(idx + 1);
+    }
+  });
+
+  return { rows, invalidLines, delimiter };
+}
+
+document.getElementById('import-text').addEventListener('input', (e) => {
+  const preview = document.getElementById('import-preview');
+  const text = e.target.value;
+  if (!text.trim()) {
+    preview.textContent = '';
+    return;
+  }
+  const { rows, invalidLines, delimiter } = parseImportText(text);
+  const delimiterLabel = delimiter === '\t' ? 'Tab' : '逗號';
+  let msg = `偵測到分隔符：${delimiterLabel}，可匯入 ${rows.length} 筆`;
+  if (invalidLines.length > 0) {
+    msg += `，第 ${invalidLines.slice(0, 5).join('、')}${invalidLines.length > 5 ? ' 等' : ''} 行格式有問題會被跳過`;
+  }
+  preview.textContent = msg;
+});
+
+document.getElementById('import-btn').onclick = async () => {
+  const text = document.getElementById('import-text').value;
+  const unitIds = getCheckedUnitIds('import-unit-checkboxes');
+  const toast = document.getElementById('import-toast');
+  toast.textContent = '';
+
+  const { rows, invalidLines } = parseImportText(text);
+
+  if (rows.length === 0) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '沒有偵測到有效的資料，請確認格式是「單字,解釋」或「單字[Tab]解釋」';
+    return;
+  }
+
+  toast.style.color = 'var(--muted)';
+  toast.textContent = `匯入中...（0/${rows.length}）`;
+
+  // 批次寫入：一次最多 200 筆一批，避免單次請求過大，也比逐筆送快很多
+  const BATCH_SIZE = 200;
+  let insertedCards = [];
+  let failedCount = 0;
+  const failReasons = [];
+
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE).map(r => ({
+      front: r.front,
+      back: r.back,
+      user_id: currentUser.id,
+    }));
+
+    const { data: cards, error } = await sb
+      .from('cards')
+      .insert(batch)
+      .select();
+
+    if (error) {
+      failedCount += batch.length;
+      failReasons.push(error.message);
+    } else if (cards) {
+      insertedCards = insertedCards.concat(cards.map(c => c.id));
+    }
+
+    toast.textContent = `匯入中...（${Math.min(i + BATCH_SIZE, rows.length)}/${rows.length}）`;
+  }
+
+  if (insertedCards.length > 0) {
+    const states = insertedCards.map(id => ({ card_id: id }));
+    const { error: stateError } = await sb.from('review_state').insert(states);
+    if (stateError) {
+      failReasons.push('部分卡片的複習排程建立失敗：' + stateError.message);
+    }
+
+    // 把整批新卡連結到勾選的每個單元（一張卡可以同時連到多個單元）
+    if (unitIds.length > 0) {
+      const links = [];
+      insertedCards.forEach(cardId => {
+        unitIds.forEach(unitId => {
+          links.push({ card_id: cardId, unit_id: unitId });
+        });
+      });
+      for (let i = 0; i < links.length; i += BATCH_SIZE) {
+        const { error: linkError } = await sb.from('card_units').insert(links.slice(i, i + BATCH_SIZE));
+        if (linkError) {
+          failReasons.push('部分單元連結建立失敗：' + linkError.message);
+        }
+      }
+    }
+  }
+
+  let resultMsg = `完成！成功匯入 ${insertedCards.length} 個單字`;
+  if (invalidLines.length > 0) {
+    resultMsg += `，${invalidLines.length} 行格式錯誤已跳過`;
+  }
+  if (failedCount > 0) {
+    resultMsg += `，${failedCount} 筆寫入失敗`;
+  }
+
+  toast.style.color = (failedCount > 0 || invalidLines.length > 0) ? 'var(--warn)' : 'var(--accent)';
+  toast.textContent = resultMsg;
+
+  if (failReasons.length > 0) {
+    toast.textContent += '（原因：' + failReasons[0] + '）';
+  }
+
+  document.getElementById('import-text').value = '';
+  document.getElementById('import-preview').textContent = '';
+  loadUnits();
+};
+
+
+// ===== 複習邏輯（四選項評分 + 學習中階段本輪重排）=====
+document.getElementById('review-unit-select').addEventListener('change', (e) => {
+  reviewUnitFilter = e.target.value;
+  loadDueCards();
+});
+
+async function loadDueCards() {
+  const today = taipeiDateStr();
+
+  const { data: states } = await sb
+    .from('review_state')
+    .select('*, cards(*)')
+    .lte('next_review_date', today);
+
+  let filtered = (states || []).filter(s => s.cards);
+
+  if (reviewUnitFilter === 'none') {
+    // 未分類：卡片沒有出現在 card_units 關聯表裡
+    const { data: links } = await sb.from('card_units').select('card_id');
+    const linkedIds = new Set((links || []).map(l => l.card_id));
+    filtered = filtered.filter(s => !linkedIds.has(s.card_id));
+  } else if (reviewUnitFilter !== 'all') {
+    // 特定單元：卡片有連結到這個單元
+    const { data: links } = await sb.from('card_units').select('card_id').eq('unit_id', reviewUnitFilter);
+    const allowedIds = new Set((links || []).map(l => l.card_id));
+    filtered = filtered.filter(s => allowedIds.has(s.card_id));
+  }
+
+  // dueCards 是本輪的佇列，之後「重來/困難」會把卡片重新插入這個陣列中間，不是重新查資料庫
+  dueCards = filtered;
+  currentCardIndex = 0;
+
+  document.getElementById('stat-due').textContent = filtered.length;
+  renderReviewArea();
+}
+
+function renderReviewArea() {
+  const area = document.getElementById('review-area');
+
+  if (dueCards.length === 0) {
+    area.innerHTML = `
+      <div class="empty-state">
+        <div class="big">🎉</div>
+        <div>這個範圍今天沒有需要複習的單字了</div>
+      </div>
+    `;
+    return;
+  }
+
+  if (currentCardIndex >= dueCards.length) {
+    area.innerHTML = `
+      <div class="empty-state">
+        <div class="big">✅</div>
+        <div>這一輪複習完成了！</div>
+      </div>
+    `;
+    return;
+  }
+
+  const item = dueCards[currentCardIndex];
+  const card = item.cards;
+
+  // 預覽四個選項各自會產生的效果（學習中階段用「這輪內第幾張後再出現」，畢業後才用天數）
+  const previews = {
+    again: calcNextReview(item, 'again'),
+    hard: calcNextReview(item, 'hard'),
+    good: calcNextReview(item, 'good'),
+    easy: calcNextReview(item, 'easy'),
+  };
+
+  const learningBadge = item.is_learning
+    ? '<div class="learning-badge">學習中</div>'
+    : '';
+
+  area.innerHTML = `
+    <div class="review-card" id="flip-area">
+      ${learningBadge}
+      <div class="review-front">${escapeHtml(card.front)}</div>
+      <div class="review-back" id="review-back">${escapeHtml(card.back)}</div>
+      <div class="review-hint" id="review-hint">點卡片看解釋</div>
+    </div>
+    <div class="answer-buttons hidden" id="answer-buttons">
+      <button class="ans-btn ans-again" data-grade="again">
+        <span>重來</span>
+        <span class="interval-preview">${previewLabel(previews.again)}</span>
+      </button>
+      <button class="ans-btn ans-hard" data-grade="hard">
+        <span>困難</span>
+        <span class="interval-preview">${previewLabel(previews.hard)}</span>
+      </button>
+      <button class="ans-btn ans-good" data-grade="good">
+        <span>良好</span>
+        <span class="interval-preview">${previewLabel(previews.good)}</span>
+      </button>
+      <button class="ans-btn ans-easy" data-grade="easy">
+        <span>簡單</span>
+        <span class="interval-preview">${previewLabel(previews.easy)}</span>
+      </button>
+    </div>
+  `;
+
+  document.getElementById('flip-area').onclick = () => {
+    document.getElementById('review-back').style.display = 'block';
+    document.getElementById('review-hint').classList.add('hidden');
+    document.getElementById('answer-buttons').classList.remove('hidden');
+  };
+
+  document.querySelectorAll('.ans-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      gradeCard(item, btn.dataset.grade);
+    };
+  });
+}
+
+// 學習中階段的步驟數（不是分鐘，是「本輪內要再出現幾次才畢業」）
+const LEARNING_STEPS = 2; // 第0步、第1步，通過第1步之後畢業
+
+function formatInterval(days) {
+  if (days < 1) return '<1天';
+  if (days === 1) return '1天';
+  if (days < 30) return days + '天';
+  if (days < 365) return Math.round(days / 30) + '個月';
+  return Math.round(days / 365) + '年';
+}
+
+// 學習中階段顯示「這輪內還會出現」，畢業後顯示天數
+function previewLabel(preview) {
+  if (preview.requeue) {
+    // 佇列剩餘卡片很少時，往後插的位置可能就是下一張，文案改精確一點避免誤導
+    const remaining = dueCards.length - currentCardIndex - 1;
+    return remaining <= 1 ? '下一張後再考' : '稍後再考';
+  }
+  return formatInterval(preview.interval_days);
+}
+
+// 核心演算法：學習中階段（本輪內重排）+ 畢業後 SM-2 四選項變體
+function calcNextReview(state, grade) {
+  let { ease_factor, interval_days, repetitions, learning_step, is_learning } = state;
+  is_learning = is_learning !== false; // 預設 true（相容舊資料沒有這欄位的情況）
+  learning_step = learning_step || 0;
+
+  // ---- 還在學習中階段 ----
+  if (is_learning) {
+    if (grade === 'again') {
+      // 打回第 0 步，本輪稍後再出現
+      return {
+        ease_factor,
+        interval_days: 0,
+        repetitions,
+        learning_step: 0,
+        is_learning: true,
+        requeue: true,
+        next_review_date: todayStr(),
+        last_reviewed_at: new Date().toISOString(),
+        last_grade: grade,
+      };
+    }
+    if (grade === 'hard') {
+      // 留在同一步，本輪稍後再出現
+      return {
+        ease_factor,
+        interval_days: 0,
+        repetitions,
+        learning_step: learning_step,
+        is_learning: true,
+        requeue: true,
+        next_review_date: todayStr(),
+        last_reviewed_at: new Date().toISOString(),
+        last_grade: grade,
+      };
+    }
+    if (grade === 'good') {
+      const nextStep = learning_step + 1;
+      if (nextStep >= LEARNING_STEPS) {
+        // 畢業！進入正式長期複習
+        return graduateCard(ease_factor, 1, grade);
+      }
+      // 還沒畢業，本輪稍後再出現一次
+      return {
+        ease_factor,
+        interval_days: 0,
+        repetitions,
+        learning_step: nextStep,
+        is_learning: true,
+        requeue: true,
+        next_review_date: todayStr(),
+        last_reviewed_at: new Date().toISOString(),
+        last_grade: grade,
+      };
+    }
+    if (grade === 'easy') {
+      // 直接畢業，且起始間隔比良好畢業更長
+      return graduateCard(ease_factor, 4, grade);
+    }
+  }
+
+  // ---- 已畢業，正式長期複習（SM-2 四選項變體）----
+  if (grade === 'again') {
+    // 忘記了，重新回到學習中階段
+    return {
+      ease_factor: Math.max(1.3, ease_factor - 0.2),
+      interval_days: 0,
+      repetitions: 0,
+      learning_step: 0,
+      is_learning: true,
+      requeue: true,
+      next_review_date: todayStr(),
+      last_reviewed_at: new Date().toISOString(),
+      last_grade: grade,
+    };
+  } else if (grade === 'hard') {
+    repetitions += 1;
+    interval_days = Math.max(1, Math.round(interval_days * 1.2)) || 1;
+    ease_factor = Math.max(1.3, ease_factor - 0.15);
+  } else if (grade === 'good') {
+    repetitions += 1;
+    interval_days = Math.round(interval_days * ease_factor) || 6;
+  } else if (grade === 'easy') {
+    repetitions += 1;
+    interval_days = Math.round(interval_days * ease_factor * 1.3) || 8;
+    ease_factor = ease_factor + 0.15;
+  }
+
+  const nextDate = new Date();
+  nextDate.setDate(nextDate.getDate() + interval_days);
+
+  return {
+    ease_factor,
+    interval_days,
+    repetitions,
+    learning_step: 0,
+    is_learning: false,
+    requeue: false,
+    next_review_date: taipeiDateStr(nextDate),
+    last_reviewed_at: new Date().toISOString(),
+    last_grade: grade,
+  };
+}
+
+function graduateCard(easeFactor, startDays, grade) {
+  const nextDate = new Date();
+  nextDate.setDate(nextDate.getDate() + startDays);
+  return {
+    ease_factor: easeFactor,
+    interval_days: startDays,
+    repetitions: 1,
+    learning_step: 0,
+    is_learning: false,
+    requeue: false,
+    next_review_date: taipeiDateStr(nextDate),
+    last_reviewed_at: new Date().toISOString(),
+    last_grade: grade,
+  };
+}
+
+function todayStr() {
+  return taipeiDateStr();
+}
+
+async function gradeCard(item, grade) {
+  const updated = calcNextReview(item, grade);
+  const requeue = updated.requeue;
+  delete updated.requeue; // 這個欄位只是前端邏輯用，不寫進資料庫
+
+  // 這裡是兩個獨立的資料庫請求（更新排程、寫入紀錄），不是同一筆交易。
+  // 如果只更新了排程卻沒寫紀錄成功，統計會少一筆但排程仍正確；
+  // 反過來如果排程更新失敗，就不該假裝這次複習成功，所以先檢查第一步。
+  const { error: stateError } = await sb
+    .from('review_state')
+    .update(updated)
+    .eq('card_id', item.card_id);
+
+  if (stateError) {
+    alert('複習紀錄儲存失敗，請檢查網路連線後重試：\n' + stateError.message);
+    return; // 停在原地，不跳下一張、不寫入 review_logs，避免資料不一致
+  }
+
+  // 寫入複習紀錄（用於正確率統計）
+  const { error: logError } = await sb.from('review_logs').insert({
+    card_id: item.card_id,
+    user_id: currentUser.id,
+    grade: grade,
+  });
+
+  if (logError) {
+    // 排程已經更新成功了，只是統計紀錄沒寫到——不影響複習本身，
+    // 但要讓使用者知道這次的紀錄可能不會出現在統計頁裡
+    console.error('review_logs 寫入失敗：', logError.message);
+    alert('複習已生效，但這次的紀錄可能不會出現在統計頁裡（' + logError.message + '）');
+  }
+
+  // 更新本地 item 狀態，供之後可能的重排使用
+  Object.assign(item, updated);
+
+  if (requeue) {
+    // 從佇列移除，插入到後面（模擬「稍後再考」，往後插 3~6 張的位置）
+    dueCards.splice(currentCardIndex, 1);
+    const insertAt = Math.min(dueCards.length, currentCardIndex + 3 + Math.floor(Math.random() * 3));
+    dueCards.splice(insertAt, 0, item);
+    // currentCardIndex 不變，直接顯示佇列裡現在這個位置的下一張
+  } else {
+    currentCardIndex += 1;
+  }
+
+  renderReviewArea();
+}
+
+// ===== 統計 =====
+let statsUnitFilter = 'all';
+
+document.getElementById('stats-unit-select').addEventListener('change', (e) => {
+  statsUnitFilter = e.target.value;
+  loadStats();
+});
+
+async function loadStats() {
+  // 先算出目前篩選範圍內有哪些 card_id，正確率跟每日複習量都要用這個範圍過濾
+  let cardIdsInScope = null; // null 代表不限制（全部單元）
+
+  if (statsUnitFilter === 'none') {
+    const { data: allCards } = await sb.from('cards').select('id');
+    const { data: links } = await sb.from('card_units').select('card_id');
+    const linkedIds = new Set((links || []).map(l => l.card_id));
+    cardIdsInScope = (allCards || []).filter(c => !linkedIds.has(c.id)).map(c => c.id);
+  } else if (statsUnitFilter !== 'all') {
+    const { data: links } = await sb.from('card_units').select('card_id').eq('unit_id', statsUnitFilter);
+    cardIdsInScope = (links || []).map(l => l.card_id);
+  }
+
+  await loadAccuracy(cardIdsInScope);
+  await loadDailyChart(cardIdsInScope);
+  await loadUnitProgress();
+}
+
+async function loadAccuracy(cardIdsInScope) {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  let query = sb
+    .from('review_logs')
+    .select('grade, card_id')
+    .gte('reviewed_at', sevenDaysAgo.toISOString());
+
+  const { data: allLogs } = await query;
+
+  const logs = cardIdsInScope
+    ? (allLogs || []).filter(l => cardIdsInScope.includes(l.card_id))
+    : (allLogs || []);
+
+  const total = logs.length;
+  const counts = { again: 0, hard: 0, good: 0, easy: 0 };
+  logs.forEach(l => {
+    if (counts.hasOwnProperty(l.grade)) counts[l.grade] += 1;
+  });
+
+  // 正確率定義：良好+簡單 視為「有記得」，重來+困難 視為「沒記熟」
+  const correct = counts.good + counts.easy;
+  const pct = total > 0 ? Math.round((correct / total) * 100) : null;
+
+  document.getElementById('accuracy-pct').textContent = pct === null ? '-' : pct + '%';
+  document.getElementById('accuracy-total').textContent = total;
+
+  const barRow = document.getElementById('grade-bar-row');
+  if (total === 0) {
+    barRow.innerHTML = '';
+    return;
+  }
+
+  const colors = { again: 'var(--danger)', hard: 'var(--warn)', good: 'var(--accent)', easy: 'var(--blue)' };
+  barRow.innerHTML = ['again', 'hard', 'good', 'easy'].map(g => {
+    const widthPct = (counts[g] / total) * 100;
+    if (widthPct === 0) return '';
+    return `<div class="grade-seg" style="width:${widthPct}%;background:${colors[g]};"></div>`;
+  }).join('');
+}
+
+async function loadDailyChart(cardIdsInScope) {
+  // 改讀 review_logs 而不是 review_state：
+  // review_state 每張卡只存「最後一次」複習時間，同一張卡一天複習 3 次也只會算 1 次。
+  // review_logs 每次評分都會新增一筆，才是真正的複習次數。
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+  sevenDaysAgo.setHours(0, 0, 0, 0);
+
+  const { data: allLogs } = await sb
+    .from('review_logs')
+    .select('card_id, reviewed_at')
+    .gte('reviewed_at', sevenDaysAgo.toISOString());
+
+  const logs = cardIdsInScope
+    ? (allLogs || []).filter(l => cardIdsInScope.includes(l.card_id))
+    : (allLogs || []);
+
+  const counts = {};
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = taipeiDateStr(d);
+    days.push(key);
+    counts[key] = 0;
+  }
+
+  logs.forEach(l => {
+    // reviewed_at 是完整時間戳，要用台灣時區才能正確判斷「那次複習算在哪一天」
+    const key = taipeiDateStr(new Date(l.reviewed_at));
+    if (counts.hasOwnProperty(key)) counts[key] += 1;
+  });
+
+  const maxCount = Math.max(1, ...Object.values(counts));
+  const chartEl = document.getElementById('daily-chart');
+
+  chartEl.innerHTML = days.map(day => {
+    const count = counts[day];
+    const heightPct = Math.round((count / maxCount) * 100);
+    const label = new Date(day + 'T00:00:00').toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+    return `
+      <div class="bar-col">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">${count}</div>
+        <div class="bar" style="height:${Math.max(heightPct, 2)}%;"></div>
+        <div class="bar-label">${label}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadUnitProgress() {
+  const { data: links } = await sb.from('card_units').select('card_id, unit_id');
+  const { data: states } = await sb.from('review_state').select('card_id, repetitions');
+
+  const stateMap = {};
+  (states || []).forEach(s => { stateMap[s.card_id] = s.repetitions; });
+
+  const listEl = document.getElementById('unit-progress-list');
+
+  if (statsUnitFilter === 'none') {
+    // 篩選是「未分類」時，只顯示未分類這一條進度
+    const { data: allCards } = await sb.from('cards').select('id');
+    const linkedIds = new Set((links || []).map(l => l.card_id));
+    const uncategorized = (allCards || []).filter(c => !linkedIds.has(c.id));
+    const total = uncategorized.length;
+    const learned = uncategorized.filter(c => (stateMap[c.id] || 0) >= 2).length;
+    const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
+    listEl.innerHTML = renderProgressRow('未分類', learned, total, pct);
+    return;
+  }
+
+  if (!allUnits.length) {
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:14px;">還沒有建立單元</p>';
+    return;
+  }
+
+  // 如果統計頁篩選了特定單元，這裡只顯示那個單元的進度條
+  const unitsToShow = statsUnitFilter === 'all'
+    ? allUnits
+    : allUnits.filter(u => u.id === statsUnitFilter);
+
+  const rows = unitsToShow.map(unit => {
+    const cardIdsInUnit = (links || []).filter(l => l.unit_id === unit.id).map(l => l.card_id);
+    const total = cardIdsInUnit.length;
+    const learned = cardIdsInUnit.filter(id => (stateMap[id] || 0) >= 2).length;
+    const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
+    return { name: unit.name, total, learned, pct };
+  });
+
+  listEl.innerHTML = rows.map(r => renderProgressRow(r.name, r.learned, r.total, r.pct)).join('');
+}
+
+function renderProgressRow(name, learned, total, pct) {
+  return `
+    <div class="unit-progress-row">
+      <div class="unit-progress-name">
+        <span>${escapeHtml(name)}</span>
+        <span style="color:var(--muted);font-weight:400;">${learned}/${total}</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" style="width:${pct}%;"></div>
+      </div>
+    </div>
+  `;
+}
+</script>
+
+</body>
+</html>
