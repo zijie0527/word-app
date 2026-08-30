@@ -1757,7 +1757,7 @@ async function loadWordbankUnitPicker() {
       ${byBook[book].map(u => `
         <label class="wordbank-unit-item">
           <input type="checkbox" class="wordbank-unit-checkbox" value="${escapeHtml(u.unit)}">
-          <span>${escapeHtml(u.unit)}（${u.count} 字）</span>
+          <span>${escapeHtml(u.unit)}</span>
         </label>
       `).join('')}
     </div>
