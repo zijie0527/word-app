@@ -759,6 +759,15 @@
         <div class="toast" id="import-toast"></div>
         <div class="import-preview" id="import-preview"></div>
       </div>
+
+      <div class="card-box">
+        <h2>內建課本單字庫</h2>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">
+          一鍵匯入國中英語 B1-B6 全部單字（共 1426 字），會自動依課本單元（1-1 ~ 6-CF，共 37 個）建立單元並分類，已經存在的單字不會重複新增。
+        </div>
+        <button class="btn-secondary" id="import-wordbank-btn">匯入 B1-B6 課本單字</button>
+        <div class="toast" id="wordbank-toast"></div>
+      </div>
     </div>
 
     <!-- UNITS TAB -->
@@ -1000,6 +1009,25 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
+// Supabase 單次查詢預設最多回傳 1000 筆，單字數一多（例如匯入整套課本單字庫後）
+// 很容易超過，導致資料被悄悄截斷。這個工具函式會自動分頁抓完全部資料，
+// 取代所有「理論上筆數可能超過 1000」的查詢。
+// 用法：fetchAllRows((from, to) => sb.from('x').select('y').range(from, to))
+async function fetchAllRows(buildQuery) {
+  const PAGE_SIZE = 1000;
+  let from = 0;
+  let all = [];
+  while (true) {
+    const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);
+    if (error) return { data: all, error };
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return { data: all, error: null };
+}
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -1165,8 +1193,8 @@ document.getElementById('create-unit-btn').onclick = async () => {
 async function renderUnitList() {
   const listEl = document.getElementById('unit-list');
 
-  const { data: allCards } = await sb.from('cards').select('id');
-  const { data: links } = await sb.from('card_units').select('card_id, unit_id');
+  const { data: allCards } = await fetchAllRows((from, to) => sb.from('cards').select('id').range(from, to));
+  const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id, unit_id').range(from, to));
 
   const counts = {};
   (links || []).forEach(l => {
@@ -1238,8 +1266,8 @@ async function openUnitDetail(unitId) {
   let cards;
   if (isUncategorized) {
     document.getElementById('unit-detail-title').textContent = '未分類的單字';
-    const { data: allCards } = await sb.from('cards').select('*').order('created_at', { ascending: false });
-    const { data: links } = await sb.from('card_units').select('card_id');
+    const { data: allCards } = await fetchAllRows((from, to) => sb.from('cards').select('*').order('created_at', { ascending: false }).range(from, to));
+    const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id').range(from, to));
     const linkedIds = new Set((links || []).map(l => l.card_id));
     cards = (allCards || []).filter(c => !linkedIds.has(c.id));
   } else {
@@ -1386,10 +1414,9 @@ document.getElementById('add-btn').onclick = async () => {
 };
 
 async function loadWordList() {
-  const { data: cards } = await sb
-    .from('cards')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const { data: cards } = await fetchAllRows((from, to) =>
+    sb.from('cards').select('*').order('created_at', { ascending: false }).range(from, to)
+  );
 
   document.getElementById('stat-total').textContent = cards ? cards.length : 0;
 
@@ -1400,7 +1427,7 @@ async function loadWordList() {
   }
 
   // 一次查出所有卡的單元關聯，避免每張卡各查一次（省 request 數）
-  const { data: links } = await sb.from('card_units').select('card_id, units(id, name)');
+  const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id, units(id, name)').range(from, to));
   const unitsByCard = {};
   (links || []).forEach(l => {
     if (!unitsByCard[l.card_id]) unitsByCard[l.card_id] = [];
@@ -1498,7 +1525,7 @@ function cardDedupKey(front, back) {
 }
 
 async function loadExistingFrontsSet() {
-  const { data } = await sb.from('cards').select('front, back');
+  const { data } = await fetchAllRows((from, to) => sb.from('cards').select('front, back').range(from, to));
   existingCardKeysSet = new Set((data || []).map(c => cardDedupKey(c.front, c.back)));
 }
 
@@ -1643,6 +1670,119 @@ document.getElementById('import-btn').onclick = async () => {
   loadUnits();
 };
 
+// ===== 內建課本單字庫（B1-B6，含分單元）=====
+document.getElementById('import-wordbank-btn').onclick = async () => {
+  const toast = document.getElementById('wordbank-toast');
+  toast.textContent = '';
+
+  if (!confirm('這會嘗試新增 1426 個 B1-B6 課本單字，並自動建立/使用對應的單元（1-1 ~ 6-CF）。已經存在的單字（單字+解釋都一樣）不會重複新增。確定要繼續嗎？')) {
+    return;
+  }
+
+  toast.style.color = 'var(--muted)';
+  toast.textContent = '讀取內建單字庫...';
+
+  let wordbank;
+  try {
+    wordbank = await (await fetch('wordbank_b1_b6.json')).json();
+  } catch (err) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '讀取內建單字庫失敗：' + err.message;
+    return;
+  }
+
+  // 確保每個課本單元都存在，缺的就建立
+  await loadUnits();
+  const unitNameToId = {};
+  allUnits.forEach(u => { unitNameToId[u.name] = u.id; });
+
+  const neededUnitNames = [...new Set(wordbank.map(r => r.unit))];
+  const missingUnitNames = neededUnitNames.filter(name => !unitNameToId[name]);
+
+  if (missingUnitNames.length > 0) {
+    toast.textContent = `建立 ${missingUnitNames.length} 個單元中...`;
+    const { data: newUnits, error: unitError } = await sb
+      .from('units')
+      .insert(missingUnitNames.map(name => ({ name, user_id: currentUser.id })))
+      .select();
+
+    if (unitError) {
+      toast.style.color = 'var(--danger)';
+      toast.textContent = '建立單元失敗：' + unitError.message;
+      return;
+    }
+    newUnits.forEach(u => { unitNameToId[u.name] = u.id; });
+  }
+
+  // 查重（單字+解釋都一樣才算重複，避免重複點擊這個按鈕產生重複卡片）
+  await loadExistingFrontsSet();
+  const { toInsert: rows, duplicates } = splitDuplicates(wordbank);
+
+  if (rows.length === 0) {
+    toast.style.color = 'var(--warn)';
+    toast.textContent = '這些單字都已經在你的單字庫裡了，沒有新增任何卡片';
+    return;
+  }
+
+  // 依單元分組後再各自批次寫入：同一批 insert 回傳的卡片必定同屬一個單元，
+  // 不需要依賴資料庫回傳順序跟輸入順序一致，也能正確連結到對的單元。
+  const rowsByUnit = {};
+  rows.forEach(r => {
+    if (!rowsByUnit[r.unit]) rowsByUnit[r.unit] = [];
+    rowsByUnit[r.unit].push(r);
+  });
+
+  const BATCH_SIZE = 200;
+  const allCardIds = [];
+  let failedCount = 0;
+
+  for (const unitName of Object.keys(rowsByUnit)) {
+    const unitRows = rowsByUnit[unitName];
+    const unitId = unitNameToId[unitName];
+
+    for (let i = 0; i < unitRows.length; i += BATCH_SIZE) {
+      const batch = unitRows.slice(i, i + BATCH_SIZE).map(r => ({
+        front: r.front,
+        back: r.back,
+        example: r.example || null,
+        user_id: currentUser.id,
+      }));
+
+      const { data: cards, error } = await sb.from('cards').insert(batch).select();
+
+      if (error) {
+        failedCount += batch.length;
+        continue;
+      }
+
+      const cardIds = cards.map(c => c.id);
+      allCardIds.push(...cardIds);
+
+      const links = cardIds.map(id => ({ card_id: id, unit_id: unitId }));
+      await sb.from('card_units').insert(links);
+    }
+
+    toast.textContent = `匯入中...（${allCardIds.length}/${rows.length}）`;
+  }
+
+  if (allCardIds.length > 0) {
+    const states = allCardIds.map(id => ({ card_id: id }));
+    for (let i = 0; i < states.length; i += BATCH_SIZE) {
+      await sb.from('review_state').insert(states.slice(i, i + BATCH_SIZE));
+    }
+  }
+
+  let resultMsg = `完成！新增了 ${allCardIds.length} 個單字，建立了 ${missingUnitNames.length} 個新單元`;
+  if (duplicates.length > 0) resultMsg += `，${duplicates.length} 個已存在的單字略過`;
+  if (failedCount > 0) resultMsg += `，${failedCount} 個寫入失敗`;
+
+  toast.style.color = (failedCount > 0) ? 'var(--danger)' : (duplicates.length > 0 ? 'var(--warn)' : 'var(--accent)');
+  toast.textContent = resultMsg;
+
+  await loadExistingFrontsSet();
+  loadUnits();
+};
+
 
 // ===== 複習邏輯（四選項評分 + 學習中階段本輪重排）=====
 document.getElementById('review-unit-select').addEventListener('change', (e) => {
@@ -1653,16 +1793,15 @@ document.getElementById('review-unit-select').addEventListener('change', (e) => 
 async function loadDueCards() {
   const today = taipeiDateStr();
 
-  const { data: states } = await sb
-    .from('review_state')
-    .select('*, cards(*)')
-    .lte('next_review_date', today);
+  const { data: states } = await fetchAllRows((from, to) =>
+    sb.from('review_state').select('*, cards(*)').lte('next_review_date', today).range(from, to)
+  );
 
   let filtered = (states || []).filter(s => s.cards);
 
   if (reviewUnitFilter === 'none') {
     // 未分類：卡片沒有出現在 card_units 關聯表裡
-    const { data: links } = await sb.from('card_units').select('card_id');
+    const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id').range(from, to));
     const linkedIds = new Set((links || []).map(l => l.card_id));
     filtered = filtered.filter(s => !linkedIds.has(s.card_id));
   } else if (reviewUnitFilter !== 'all') {
@@ -1993,8 +2132,8 @@ async function loadStats() {
   let cardIdsInScope = null; // null 代表不限制（全部單元）
 
   if (statsUnitFilter === 'none') {
-    const { data: allCards } = await sb.from('cards').select('id');
-    const { data: links } = await sb.from('card_units').select('card_id');
+    const { data: allCards } = await fetchAllRows((from, to) => sb.from('cards').select('id').range(from, to));
+    const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id').range(from, to));
     const linkedIds = new Set((links || []).map(l => l.card_id));
     cardIdsInScope = (allCards || []).filter(c => !linkedIds.has(c.id)).map(c => c.id);
   } else if (statsUnitFilter !== 'all') {
@@ -2011,12 +2150,9 @@ async function loadAccuracy(cardIdsInScope) {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  let query = sb
-    .from('review_logs')
-    .select('grade, card_id')
-    .gte('reviewed_at', sevenDaysAgo.toISOString());
-
-  const { data: allLogs } = await query;
+  const { data: allLogs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('grade, card_id').gte('reviewed_at', sevenDaysAgo.toISOString()).range(from, to)
+  );
 
   const logs = cardIdsInScope
     ? (allLogs || []).filter(l => cardIdsInScope.includes(l.card_id))
@@ -2057,10 +2193,9 @@ async function loadDailyChart(cardIdsInScope) {
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
   sevenDaysAgo.setHours(0, 0, 0, 0);
 
-  const { data: allLogs } = await sb
-    .from('review_logs')
-    .select('card_id, reviewed_at')
-    .gte('reviewed_at', sevenDaysAgo.toISOString());
+  const { data: allLogs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('card_id, reviewed_at').gte('reviewed_at', sevenDaysAgo.toISOString()).range(from, to)
+  );
 
   const logs = cardIdsInScope
     ? (allLogs || []).filter(l => cardIdsInScope.includes(l.card_id))
@@ -2100,8 +2235,8 @@ async function loadDailyChart(cardIdsInScope) {
 }
 
 async function loadUnitProgress() {
-  const { data: links } = await sb.from('card_units').select('card_id, unit_id');
-  const { data: states } = await sb.from('review_state').select('card_id, repetitions');
+  const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id, unit_id').range(from, to));
+  const { data: states } = await fetchAllRows((from, to) => sb.from('review_state').select('card_id, repetitions').range(from, to));
 
   const stateMap = {};
   (states || []).forEach(s => { stateMap[s.card_id] = s.repetitions; });
@@ -2110,7 +2245,7 @@ async function loadUnitProgress() {
 
   if (statsUnitFilter === 'none') {
     // 篩選是「未分類」時，只顯示未分類這一條進度
-    const { data: allCards } = await sb.from('cards').select('id');
+    const { data: allCards } = await fetchAllRows((from, to) => sb.from('cards').select('id').range(from, to));
     const linkedIds = new Set((links || []).map(l => l.card_id));
     const uncategorized = (allCards || []).filter(c => !linkedIds.has(c.id));
     const total = uncategorized.length;
@@ -2298,16 +2433,20 @@ async function loadMyStudents() {
 
   const studentIds = students.map(s => s.student_id);
 
-  const { data: cards } = await sb.from('cards').select('id, user_id').in('user_id', studentIds);
+  const { data: cards } = await fetchAllRows((from, to) =>
+    sb.from('cards').select('id, user_id').in('user_id', studentIds).range(from, to)
+  );
   const cardOwner = {};
   (cards || []).forEach(c => { cardOwner[c.id] = c.user_id; });
   const cardIds = Object.keys(cardOwner);
 
   const { data: states } = cardIds.length
-    ? await sb.from('review_state').select('card_id, repetitions').in('card_id', cardIds)
+    ? await fetchAllRows((from, to) => sb.from('review_state').select('card_id, repetitions').in('card_id', cardIds).range(from, to))
     : { data: [] };
 
-  const { data: logs } = await sb.from('review_logs').select('user_id, grade, reviewed_at').in('user_id', studentIds);
+  const { data: logs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('user_id, grade, reviewed_at').in('user_id', studentIds).range(from, to)
+  );
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
