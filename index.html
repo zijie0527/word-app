@@ -362,6 +362,23 @@
     font-size: 13px;
   }
 
+  .undo-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-top: 12px;
+  }
+
+  .undo-banner button {
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
   .review-card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -846,6 +863,13 @@
         <span class="toast" id="new-limit-toast" style="margin:0;"></span>
       </div>
 
+      <div class="new-limit-row">
+        <label for="example-before-flip-checkbox" style="display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="example-before-flip-checkbox" style="width:auto;">
+          翻面前就顯示例句
+        </label>
+      </div>
+
       <div class="unit-filter">
         <select id="review-unit-select">
           <option value="all">全部單元</option>
@@ -853,6 +877,10 @@
       </div>
 
       <div id="review-area"></div>
+      <div class="undo-banner hidden" id="undo-banner">
+        <span id="undo-banner-text"></span>
+        <button class="link-btn" id="undo-banner-btn" type="button">復原</button>
+      </div>
       <div class="inline-error" id="review-error"></div>
     </div>
 
@@ -877,6 +905,26 @@
         </div>
         <button class="btn-primary" id="add-btn">新增這張卡</button>
         <div class="toast" id="add-toast"></div>
+      </div>
+
+      <div class="card-box">
+        <div class="field">
+          <input type="text" id="word-search-input" placeholder="搜尋單字、解釋或例句">
+        </div>
+        <div style="display:flex;gap:8px;">
+          <select id="word-filter-select" style="flex:1;">
+            <option value="all">全部單字</option>
+            <option value="none">未分類</option>
+            <option value="learning">學習中</option>
+            <option value="tricky">易錯字（近 14 天重來 ≥ 2 次）</option>
+          </select>
+          <select id="word-sort-select" style="flex:1;">
+            <option value="created_desc">新增時間（新→舊）</option>
+            <option value="created_asc">新增時間（舊→新）</option>
+            <option value="next_review">下次複習日期</option>
+            <option value="hardest">最容易忘的優先</option>
+          </select>
+        </div>
       </div>
 
       <div class="word-list" id="word-list"></div>
@@ -987,11 +1035,11 @@
       </div>
 
       <div class="chart-box">
-        <h2>近 7 天正確率</h2>
+        <h2>近 7 天熟練回答率</h2>
         <div class="accuracy-row">
           <div class="accuracy-stat">
             <div class="accuracy-num" id="accuracy-pct">-</div>
-            <div class="accuracy-label">正確率</div>
+            <div class="accuracy-label">熟練回答率</div>
           </div>
           <div class="accuracy-stat">
             <div class="accuracy-num" id="accuracy-total">-</div>
@@ -1070,11 +1118,11 @@
           <div id="student-today-summary"></div>
         </div>
         <div class="card-box">
-          <h2>近 7 天正確率</h2>
+          <h2>近 7 天熟練回答率</h2>
           <div class="accuracy-row">
             <div class="accuracy-stat">
               <div class="accuracy-num" id="student-accuracy-pct">-</div>
-              <div class="accuracy-label">正確率</div>
+              <div class="accuracy-label">熟練回答率</div>
             </div>
             <div class="accuracy-stat">
               <div class="accuracy-num" id="student-accuracy-total">-</div>
@@ -1117,6 +1165,19 @@ function taipeiDateStr(date = new Date()) {
   // en-CA 語系的格式剛好就是 YYYY-MM-DD，用它最省事
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(date);
 }
+
+// 「穩定掌握」的判斷標準：用複習間隔天數而不是單純的連續答對次數（repetitions）。
+// 原本用 repetitions >= 2 會讓「畢業後馬上忘記又被打回來、重新畢業一次」的卡
+// 也被算進已學會，但它其實還很不熟；改用間隔天數才反映真正記得多牢。
+const MATURE_INTERVAL_DAYS = 14;
+function isMature(intervalDays) {
+  return (intervalDays || 0) >= MATURE_INTERVAL_DAYS;
+}
+
+// 卡片顯示後開始計時，如果學生看完卡片就離開（吃飯、上廁所...）很久才回來按評分，
+// 那段離開的時間不該被算進「平均每張耗時」，所以超過這個上限的耗時視為離開過，
+// 統計平均秒數時直接排除（但原始 duration_ms 還是照實存進資料庫，不動它）。
+const MAX_REASONABLE_DURATION_MS = 3 * 60 * 1000;
 
 let currentUser = null;
 let dueCards = [];
@@ -1786,6 +1847,10 @@ document.getElementById('add-btn').onclick = async () => {
   loadWordList();
 };
 
+// 快取上次查到的完整清單（含單元、學習狀態、近14天重來次數），
+// 搜尋/篩選/排序都直接在這份快取上做，不用每次都重新打資料庫。
+let wordListCache = [];
+
 async function loadWordList() {
   const { data: cards } = await fetchAllRows((from, to) =>
     sb.from('cards').select('*').order('created_at', { ascending: false }).range(from, to)
@@ -1793,9 +1858,9 @@ async function loadWordList() {
 
   document.getElementById('stat-total').textContent = cards ? cards.length : 0;
 
-  const listEl = document.getElementById('word-list');
   if (!cards || cards.length === 0) {
-    listEl.innerHTML = '';
+    wordListCache = [];
+    renderFilteredWordList();
     return;
   }
 
@@ -1807,13 +1872,82 @@ async function loadWordList() {
     if (l.units) unitsByCard[l.card_id].push(l.units.name);
   });
 
-  listEl.innerHTML = cards.map(c => {
-    const tags = (unitsByCard[c.id] || []).map(name => `<span class="word-unit">${escapeHtml(name)}</span>`).join('');
-    return wordRowHtml(c, tags ? `<div>${tags}</div>` : '');
+  const cardIds = cards.map(c => c.id);
+
+  const states = await fetchAllRowsInChunks(cardIds, 300, (chunk) =>
+    sb.from('review_state').select('card_id, is_learning, next_review_date, repetitions').in('card_id', chunk)
+  );
+  const stateByCard = {};
+  states.forEach(s => { stateByCard[s.card_id] = s; });
+
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const againLogs = await fetchAllRowsInChunks(cardIds, 300, (chunk) =>
+    sb.from('review_logs').select('card_id').in('card_id', chunk).eq('grade', 'again').gte('reviewed_at', fourteenDaysAgo.toISOString())
+  );
+  const againCountByCard = {};
+  againLogs.forEach(l => { againCountByCard[l.card_id] = (againCountByCard[l.card_id] || 0) + 1; });
+
+  wordListCache = cards.map(c => {
+    const state = stateByCard[c.id];
+    return {
+      card: c,
+      tags: unitsByCard[c.id] || [],
+      isLearning: state ? state.is_learning !== false : true,
+      nextReviewDate: state ? state.next_review_date : null,
+      againCount14d: againCountByCard[c.id] || 0,
+    };
+  });
+
+  renderFilteredWordList();
+}
+
+function renderFilteredWordList() {
+  const listEl = document.getElementById('word-list');
+  const query = document.getElementById('word-search-input').value.trim().toLowerCase();
+  const filter = document.getElementById('word-filter-select').value;
+  const sort = document.getElementById('word-sort-select').value;
+
+  let items = wordListCache;
+
+  if (query) {
+    items = items.filter(w =>
+      w.card.front.toLowerCase().includes(query) ||
+      w.card.back.toLowerCase().includes(query) ||
+      (w.card.example || '').toLowerCase().includes(query)
+    );
+  }
+
+  if (filter === 'none') items = items.filter(w => w.tags.length === 0);
+  else if (filter === 'learning') items = items.filter(w => w.isLearning);
+  else if (filter === 'tricky') items = items.filter(w => w.againCount14d >= 2);
+
+  items = items.slice();
+  if (sort === 'created_asc') items.reverse(); // 快取本來就是新到舊，反過來就是舊到新
+  else if (sort === 'next_review') items.sort((a, b) => (a.nextReviewDate || '9999-99-99').localeCompare(b.nextReviewDate || '9999-99-99'));
+  else if (sort === 'hardest') items.sort((a, b) => b.againCount14d - a.againCount14d);
+
+  if (wordListCache.length === 0) {
+    listEl.innerHTML = '';
+    return;
+  }
+
+  if (items.length === 0) {
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:14px;text-align:center;padding:20px 0;">沒有符合條件的單字</p>';
+    return;
+  }
+
+  listEl.innerHTML = items.map(w => {
+    const tagsHtml = w.tags.map(name => `<span class="word-unit">${escapeHtml(name)}</span>`).join('');
+    const trickyBadge = w.againCount14d >= 2
+      ? `<span class="risk-badge danger" style="margin-left:4px;">近14天重來 ${w.againCount14d} 次</span>`
+      : '';
+    const extra = (tagsHtml || trickyBadge) ? `<div>${tagsHtml}${trickyBadge}</div>` : '';
+    return wordRowHtml(w.card, extra);
   }).join('');
 
   const cardsById = {};
-  cards.forEach(c => { cardsById[c.id] = c; });
+  items.forEach(w => { cardsById[w.card.id] = w.card; });
   attachEditHandlers(listEl, cardsById, loadWordList);
 
   listEl.querySelectorAll('.del-btn').forEach(btn => {
@@ -1824,6 +1958,10 @@ async function loadWordList() {
     };
   });
 }
+
+document.getElementById('word-search-input').addEventListener('input', renderFilteredWordList);
+document.getElementById('word-filter-select').addEventListener('change', renderFilteredWordList);
+document.getElementById('word-sort-select').addEventListener('change', renderFilteredWordList);
 
 // ===== 匯入 =====
 // 自動偵測分隔符：如果整份文字裡 Tab 比逗號多，判斷是 Tab 分隔（例如從 Excel 複製），否則用逗號
@@ -2287,11 +2425,21 @@ document.getElementById('review-unit-select').addEventListener('change', (e) => 
 let dailyNewLimit = 15;
 let hiddenNewCount = 0; // 因為超過今日新卡上限而還沒放進佇列的張數，給空狀態文案用
 
+let exampleBeforeFlip = true;
+
 async function loadUserSettings() {
-  const { data } = await sb.from('user_settings').select('daily_new_limit').eq('user_id', currentUser.id).maybeSingle();
+  const { data } = await sb.from('user_settings').select('daily_new_limit, example_before_flip').eq('user_id', currentUser.id).maybeSingle();
   dailyNewLimit = data ? data.daily_new_limit : 15;
+  exampleBeforeFlip = data ? data.example_before_flip : true;
   document.getElementById('daily-new-limit-input').value = dailyNewLimit;
+  document.getElementById('example-before-flip-checkbox').checked = exampleBeforeFlip;
 }
+
+document.getElementById('example-before-flip-checkbox').onchange = async (e) => {
+  exampleBeforeFlip = e.target.checked;
+  await sb.from('user_settings').upsert({ user_id: currentUser.id, example_before_flip: exampleBeforeFlip });
+  renderReviewArea();
+};
 
 document.getElementById('save-new-limit-btn').onclick = async () => {
   const toast = document.getElementById('new-limit-toast');
@@ -2332,6 +2480,7 @@ async function countTodayNewReviews() {
 }
 
 async function loadDueCards() {
+  hideUndoBanner(); // 換單元篩選或重新整理佇列時，之前的復原快照就跟新佇列對不上了
   const today = taipeiDateStr();
 
   const { data: states } = await fetchAllRows((from, to) =>
@@ -2451,7 +2600,7 @@ async function renderReviewArea() {
     <div class="review-card" id="flip-area">
       ${learningBadge}
       <div class="review-front">${escapeHtml(card.front)}</div>
-      ${card.example ? `<div class="review-example">${escapeHtml(card.example)}</div>` : ''}
+      ${card.example ? `<div class="review-example${exampleBeforeFlip ? '' : ' hidden'}" id="review-example">${escapeHtml(card.example)}</div>` : ''}
       <div class="review-back" id="review-back">${escapeHtml(card.back)}</div>
       <div class="review-hint" id="review-hint">點卡片看解釋</div>
     </div>
@@ -2489,6 +2638,8 @@ function flipCurrentCard() {
   const back = document.getElementById('review-back');
   if (!back || back.style.display === 'block') return;
   back.style.display = 'block';
+  const example = document.getElementById('review-example');
+  if (example) example.classList.remove('hidden');
   document.getElementById('review-hint').classList.add('hidden');
   document.getElementById('answer-buttons').classList.remove('hidden');
 }
@@ -2684,10 +2835,66 @@ function setGradingUiLocked(locked) {
   answerButtons.style.pointerEvents = locked ? 'none' : 'auto';
 }
 
+const GRADE_LABELS = { again: '重來', hard: '困難', good: '良好', easy: '簡單' };
+let pendingUndo = null;
+let undoTimeoutId = null;
+
+function hideUndoBanner() {
+  pendingUndo = null;
+  if (undoTimeoutId) { clearTimeout(undoTimeoutId); undoTimeoutId = null; }
+  document.getElementById('undo-banner').classList.add('hidden');
+}
+
+function showUndoBanner(gradeLabel) {
+  document.getElementById('undo-banner-text').textContent = `已選擇「${gradeLabel}」`;
+  document.getElementById('undo-banner').classList.remove('hidden');
+  undoTimeoutId = setTimeout(hideUndoBanner, 5000);
+}
+
+document.getElementById('undo-banner-btn').onclick = async () => {
+  if (!pendingUndo || isGrading) return;
+  const undo = pendingUndo;
+  hideUndoBanner();
+  isGrading = true;
+  setGradingUiLocked(true);
+
+  try {
+    const { error } = await sb.rpc('undo_last_grade', {
+      p_log_id: undo.logId,
+      p_card_id: undo.cardId,
+      p_ease_factor: undo.previousState.ease_factor,
+      p_interval_days: undo.previousState.interval_days,
+      p_repetitions: undo.previousState.repetitions,
+      p_learning_step: undo.previousState.learning_step,
+      p_is_learning: undo.previousState.is_learning,
+      p_next_review_date: undo.previousState.next_review_date,
+      p_last_reviewed_at: undo.previousState.last_reviewed_at,
+      p_last_grade: undo.previousState.last_grade,
+    });
+
+    if (error) {
+      document.getElementById('review-error').textContent = '復原失敗：' + error.message;
+      return;
+    }
+    document.getElementById('review-error').textContent = '';
+
+    Object.assign(undo.item, undo.previousState);
+    dueCards = undo.dueCardsSnapshot;
+    currentCardIndex = undo.currentIndexSnapshot;
+
+    document.getElementById('stat-due').textContent = dueCards.length - currentCardIndex;
+    renderReviewArea();
+  } finally {
+    isGrading = false;
+    setGradingUiLocked(false);
+  }
+};
+
 async function gradeCard(item, grade) {
   if (isGrading) return;
   isGrading = true;
   setGradingUiLocked(true);
+  hideUndoBanner(); // 一旦又評分了新的一張，上一步的復原機會就不算數了
 
   // try/finally 確保不管中途發生什麼（包括意外拋出的例外），isGrading 一定會解鎖，
   // 不然評分畫面會永久卡死、之後怎麼點都沒反應，使用者只能重新整理頁面。
@@ -2695,13 +2902,28 @@ async function gradeCard(item, grade) {
     const category = getReviewCategory(item);
     const durationMs = cardShownAt ? Math.max(0, Math.round(Date.now() - cardShownAt)) : null;
 
+    // 復原上一題要用得到評分「之前」的樣子，所以要在 Object.assign 蓋掉它之前先存一份快照。
+    const previousState = {
+      ease_factor: item.ease_factor,
+      interval_days: item.interval_days,
+      repetitions: item.repetitions,
+      learning_step: item.learning_step,
+      is_learning: item.is_learning,
+      next_review_date: item.next_review_date,
+      last_reviewed_at: item.last_reviewed_at,
+      last_grade: item.last_grade,
+    };
+    const dueCardsSnapshot = dueCards.slice();
+    const currentIndexSnapshot = currentCardIndex;
+
     const updated = calcNextReview(item, grade);
     const requeue = updated.requeue;
     delete updated.requeue; // 這個欄位只是前端邏輯用，不寫進資料庫
 
     // 更新排程 + 寫入紀錄包在 Supabase 的 grade_card RPC 裡，是同一筆資料庫交易，
-    // 不會再有「排程更新成功但紀錄沒寫到」這種中間狀態。
-    const { error: rpcError } = await sb.rpc('grade_card', {
+    // 不會再有「排程更新成功但紀錄沒寫到」這種中間狀態。RPC 會回傳新寫入的
+    // review_logs id，復原時要靠這個 id 精準刪掉那一筆、不會誤刪別筆紀錄。
+    const { data: logId, error: rpcError } = await sb.rpc('grade_card', {
       p_card_id: item.card_id,
       p_grade: grade,
       p_ease_factor: updated.ease_factor,
@@ -2731,6 +2953,11 @@ async function gradeCard(item, grade) {
       // currentCardIndex 不變，直接顯示佇列裡現在這個位置的下一張
     } else {
       currentCardIndex += 1;
+    }
+
+    if (logId) {
+      pendingUndo = { cardId: item.card_id, logId, previousState, item, dueCardsSnapshot, currentIndexSnapshot };
+      showUndoBanner(GRADE_LABELS[grade] || grade);
     }
 
     document.getElementById('stat-due').textContent = dueCards.length - currentCardIndex;
@@ -2860,10 +3087,10 @@ async function loadDailyChart(cardIdsInScope) {
 
 async function loadUnitProgress() {
   const { data: links } = await fetchAllRows((from, to) => sb.from('card_units').select('card_id, unit_id').range(from, to));
-  const { data: states } = await fetchAllRows((from, to) => sb.from('review_state').select('card_id, repetitions').range(from, to));
+  const { data: states } = await fetchAllRows((from, to) => sb.from('review_state').select('card_id, interval_days').range(from, to));
 
   const stateMap = {};
-  (states || []).forEach(s => { stateMap[s.card_id] = s.repetitions; });
+  (states || []).forEach(s => { stateMap[s.card_id] = s.interval_days; });
 
   const listEl = document.getElementById('unit-progress-list');
 
@@ -2873,7 +3100,7 @@ async function loadUnitProgress() {
     const linkedIds = new Set((links || []).map(l => l.card_id));
     const uncategorized = (allCards || []).filter(c => !linkedIds.has(c.id));
     const total = uncategorized.length;
-    const learned = uncategorized.filter(c => (stateMap[c.id] || 0) >= 2).length;
+    const learned = uncategorized.filter(c => isMature(stateMap[c.id])).length;
     const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
     listEl.innerHTML = renderProgressRow('未分類', learned, total, pct);
     return;
@@ -2892,7 +3119,7 @@ async function loadUnitProgress() {
   const rows = unitsToShow.map(unit => {
     const cardIdsInUnit = (links || []).filter(l => l.unit_id === unit.id).map(l => l.card_id);
     const total = cardIdsInUnit.length;
-    const learned = cardIdsInUnit.filter(id => (stateMap[id] || 0) >= 2).length;
+    const learned = cardIdsInUnit.filter(id => isMature(stateMap[id])).length;
     const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
     return { name: unit.name, total, learned, pct };
   });
@@ -3025,7 +3252,7 @@ async function loadTodaySummary() {
   }
 
   const count = todayLogs.length;
-  const withDuration = todayLogs.filter(l => l.duration_ms != null);
+  const withDuration = todayLogs.filter(l => l.duration_ms != null && l.duration_ms <= MAX_REASONABLE_DURATION_MS);
   const totalMs = withDuration.reduce((sum, l) => sum + l.duration_ms, 0);
   const totalSeconds = Math.round(totalMs / 100) / 10;
   const avgSeconds = withDuration.length > 0 ? Math.round(totalMs / withDuration.length / 100) / 10 : null;
@@ -3199,7 +3426,7 @@ async function loadMyStudents() {
   const cardIds = Object.keys(cardOwner);
 
   const { data: states } = cardIds.length
-    ? await fetchAllRows((from, to) => sb.from('review_state').select('card_id, repetitions').in('card_id', cardIds).range(from, to))
+    ? await fetchAllRows((from, to) => sb.from('review_state').select('card_id, interval_days').in('card_id', cardIds).range(from, to))
     : { data: [] };
 
   const { data: logs } = await fetchAllRows((from, to) =>
@@ -3211,7 +3438,7 @@ async function loadMyStudents() {
 
   const rows = students.map(s => {
     const total = (cards || []).filter(c => c.user_id === s.student_id).length;
-    const learned = (states || []).filter(st => cardOwner[st.card_id] === s.student_id && st.repetitions >= 2).length;
+    const learned = (states || []).filter(st => cardOwner[st.card_id] === s.student_id && isMature(st.interval_days)).length;
 
     const studentLogs = (logs || []).filter(l => l.user_id === s.student_id);
     const recentLogs = studentLogs.filter(l => new Date(l.reviewed_at) >= sevenDaysAgo);
@@ -3234,7 +3461,7 @@ async function loadMyStudents() {
     } else if (r.daysSinceActive >= 3) {
       badge = `<span class="risk-badge danger">已 ${r.daysSinceActive} 天沒複習</span>`;
     } else if (r.accuracy !== null && r.accuracy < 60) {
-      badge = '<span class="risk-badge warn">近期正確率偏低</span>';
+      badge = '<span class="risk-badge warn">近期熟練回答率偏低</span>';
     }
 
     return `
@@ -3245,8 +3472,8 @@ async function loadMyStudents() {
         </div>
         <div class="student-metrics">
           <span>單字 <b>${r.total}</b></span>
-          <span>已學會 <b>${r.learned}</b></span>
-          <span>7天正確率 <b>${r.accuracy === null ? '-' : r.accuracy + '%'}</b></span>
+          <span>已穩定掌握 <b>${r.learned}</b></span>
+          <span>7天熟練回答率 <b>${r.accuracy === null ? '-' : r.accuracy + '%'}</b></span>
         </div>
       </div>
     `;
@@ -3365,7 +3592,7 @@ async function loadStudentTodaySummary(studentId) {
   }
 
   const count = todayLogs.length;
-  const withDuration = todayLogs.filter(l => l.duration_ms != null);
+  const withDuration = todayLogs.filter(l => l.duration_ms != null && l.duration_ms <= MAX_REASONABLE_DURATION_MS);
   const totalMs = withDuration.reduce((sum, l) => sum + l.duration_ms, 0);
   const totalSeconds = Math.round(totalMs / 100) / 10;
   const avgSeconds = withDuration.length > 0 ? Math.round(totalMs / withDuration.length / 100) / 10 : null;
@@ -3476,18 +3703,18 @@ async function loadStudentUnitProgress(studentId, cardIds) {
     ? await fetchAllRowsInChunks(cardIds, 300, (chunk) => sb.from('card_units').select('card_id, unit_id').in('card_id', chunk))
     : [];
   const states = cardIds.length
-    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) => sb.from('review_state').select('card_id, repetitions').in('card_id', chunk))
+    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) => sb.from('review_state').select('card_id, interval_days').in('card_id', chunk))
     : [];
 
   const stateMap = {};
-  states.forEach(s => { stateMap[s.card_id] = s.repetitions; });
+  states.forEach(s => { stateMap[s.card_id] = s.interval_days; });
 
   const sortedUnits = [...units].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
   const rows = sortedUnits.map(unit => {
     const unitCardIds = links.filter(l => l.unit_id === unit.id).map(l => l.card_id);
     const total = unitCardIds.length;
-    const learned = unitCardIds.filter(id => (stateMap[id] || 0) >= 2).length;
+    const learned = unitCardIds.filter(id => isMature(stateMap[id])).length;
     const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
     return { name: unit.name, total, learned, pct };
   });
