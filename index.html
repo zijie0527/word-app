@@ -1167,8 +1167,8 @@
           <h2>指派任務</h2>
           <div id="student-assignments-list"></div>
           <div class="field" style="margin-top:14px;">
-            <label>指派單元</label>
-            <select id="assign-unit-select"></select>
+            <label>指派單元（可複選）</label>
+            <div class="unit-checkbox-list" id="assign-unit-checkboxes"></div>
           </div>
           <div class="field">
             <label>期限（選填）</label>
@@ -3830,13 +3830,16 @@ async function loadStudentAssignmentsForm(studentId) {
   );
   const sortedUnits = (units || []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
-  const selectEl = document.getElementById('assign-unit-select');
+  const checkboxesEl = document.getElementById('assign-unit-checkboxes');
   if (sortedUnits.length === 0) {
-    selectEl.innerHTML = '<option value="">（這個學生還沒有單元）</option>';
-    selectEl.disabled = true;
+    checkboxesEl.innerHTML = '<div class="unit-checkbox-empty">這個學生還沒有單元</div>';
   } else {
-    selectEl.disabled = false;
-    selectEl.innerHTML = sortedUnits.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+    checkboxesEl.innerHTML = sortedUnits.map(u => `
+      <label class="unit-checkbox-item">
+        <input type="checkbox" value="${u.id}">
+        <span>${escapeHtml(u.name)}</span>
+      </label>
+    `).join('');
   }
 
   const { data: assignments } = await sb
@@ -3872,20 +3875,25 @@ document.getElementById('assign-unit-btn').onclick = async () => {
 
   if (!currentStudentStatsId) return;
 
-  const unitId = document.getElementById('assign-unit-select').value;
-  if (!unitId) {
+  const unitIds = getCheckedUnitIds('assign-unit-checkboxes');
+  if (unitIds.length === 0) {
     toast.style.color = 'var(--danger)';
-    toast.textContent = '請選擇要指派的單元';
+    toast.textContent = '請至少選擇一個要指派的單元';
     return;
   }
 
-  const { error } = await sb.from('assignments').insert({
-    teacher_id: currentUser.id,
-    student_id: currentStudentStatsId,
-    unit_id: unitId,
-    due_date: document.getElementById('assign-due-date').value || null,
-    note: document.getElementById('assign-note').value.trim() || null,
-  });
+  const dueDate = document.getElementById('assign-due-date').value || null;
+  const note = document.getElementById('assign-note').value.trim() || null;
+
+  const { error } = await sb.from('assignments').insert(
+    unitIds.map(unitId => ({
+      teacher_id: currentUser.id,
+      student_id: currentStudentStatsId,
+      unit_id: unitId,
+      due_date: dueDate,
+      note: note,
+    }))
+  );
 
   if (error) {
     toast.style.color = 'var(--danger)';
@@ -3894,7 +3902,7 @@ document.getElementById('assign-unit-btn').onclick = async () => {
   }
 
   toast.style.color = 'var(--accent)';
-  toast.textContent = '已指派';
+  toast.textContent = `已指派 ${unitIds.length} 個單元`;
   document.getElementById('assign-due-date').value = '';
   document.getElementById('assign-note').value = '';
   loadStudentAssignmentsForm(currentStudentStatsId);
