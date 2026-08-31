@@ -1110,7 +1110,10 @@ const authError = document.getElementById('auth-error');
 // 轉成一個內部用的假信箱，不會真的寄信，也不會顯示給任何人看。
 // 帳號格式限制英數字、底線、連字號，避免轉出來的假信箱格式不合法。
 function idToEmail(id) {
-  return id.trim().toLowerCase() + '@word-app.local';
+  const trimmed = id.trim().toLowerCase();
+  // 如果輸入本身就是完整 email（帶 @），代表是改用帳號登入之前就註冊的舊帳號，
+  // 直接照原樣使用，不要硬轉換，不然舊帳號會登不進去。
+  return trimmed.includes('@') ? trimmed : trimmed + '@word-app.local';
 }
 
 function isValidAccountId(id) {
