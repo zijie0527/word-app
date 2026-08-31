@@ -347,6 +347,21 @@
     margin-bottom: 16px;
   }
 
+  .new-limit-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .new-limit-row input {
+    width: 56px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
   .review-card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -812,12 +827,23 @@
       <div class="stat-row">
         <div class="stat">
           <div class="stat-num" id="stat-due">0</div>
-          <div class="stat-label">今天待複習</div>
+          <div class="stat-label">複習</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="stat-new">0</div>
+          <div class="stat-label">新學</div>
         </div>
         <div class="stat">
           <div class="stat-num" id="stat-total">0</div>
           <div class="stat-label">總單字數</div>
         </div>
+      </div>
+
+      <div class="new-limit-row">
+        <label for="daily-new-limit-input">每天新卡上限</label>
+        <input type="number" id="daily-new-limit-input" min="0" max="200">
+        <button class="link-btn" id="save-new-limit-btn">儲存</button>
+        <span class="toast" id="new-limit-toast" style="margin:0;"></span>
       </div>
 
       <div class="unit-filter">
@@ -1197,6 +1223,7 @@ async function onLoggedIn(user) {
   appScreen.classList.remove('hidden');
   await loadUnits();
   await loadWordList();
+  await loadUserSettings();
   await loadDueCards();
 }
 
@@ -1294,6 +1321,25 @@ async function deleteCardsInUnit(unitId) {
     if (error) return error;
   }
   return null;
+}
+
+// 算「如果連單字一起刪除，會影響多少張卡」，尤其是那些同時屬於其他單元、
+// 刪除後會從所有單元消失的卡，讓使用者刪除前看得到具體影響，不是憑空按下去。
+async function getUnitDeleteImpact(unitId) {
+  const { data: linksInUnit } = await fetchAllRows((from, to) =>
+    sb.from('card_units').select('card_id').eq('unit_id', unitId).range(from, to)
+  );
+  const cardIds = (linksInUnit || []).map(l => l.card_id);
+  if (cardIds.length === 0) return { total: 0, shared: 0 };
+
+  const allLinks = await fetchAllRowsInChunks(cardIds, 300, (chunk) =>
+    sb.from('card_units').select('card_id, unit_id').in('card_id', chunk)
+  );
+  const countByCard = {};
+  allLinks.forEach(l => { countByCard[l.card_id] = (countByCard[l.card_id] || 0) + 1; });
+  const shared = cardIds.filter(id => (countByCard[id] || 0) > 1).length;
+
+  return { total: cardIds.length, shared };
 }
 
 function escapeHtml(str) {
@@ -1515,6 +1561,23 @@ async function renderUnitList() {
       const deleteWordsToo = confirm('要同時刪除這個單元裡的所有單字嗎（連同複習紀錄，無法復原）？\n\n選「取消」的話，單字會保留，只是變成未分類。');
 
       if (deleteWordsToo) {
+        const unitName = allUnits.find(u => u.id === btn.dataset.id)?.name || '這個單元';
+        const impact = await getUnitDeleteImpact(btn.dataset.id);
+
+        let msg = `即將永久刪除「${unitName}」裡的 ${impact.total} 張單字。`;
+        if (impact.shared > 0) {
+          msg += `\n其中 ${impact.shared} 張也屬於其他單元，刪除後將從所有單元消失。`;
+        }
+        if (!confirm(msg + '\n\n這個動作無法復原，確定要繼續嗎？')) return;
+
+        if (impact.shared > 0) {
+          const typed = prompt(`為了保護你的資料，請輸入單元名稱「${unitName}」以確認刪除：`);
+          if (typed !== unitName) {
+            alert('輸入的名稱不符，已取消刪除');
+            return;
+          }
+        }
+
         const error = await deleteCardsInUnit(btn.dataset.id);
         if (error) {
           alert('刪除單字失敗：' + error.message);
@@ -1633,19 +1696,33 @@ document.getElementById('delete-unit-btn').onclick = async () => {
   const deleteWordsToo = document.getElementById('delete-unit-words-too').checked;
   const toast = document.getElementById('delete-unit-toast');
 
-  const confirmMsg = deleteWordsToo
-    ? `確定要刪除「${unitName}」嗎？\n\n這個單元裡的所有單字會被永久刪除，連同複習紀錄一起消失。這個動作無法復原。`
-    : `確定要刪除「${unitName}」嗎？\n\n單字本身不會被刪除，會變成未分類。這個動作無法復原。`;
-
-  if (!confirm(confirmMsg)) {
-    return;
-  }
-
   if (deleteWordsToo) {
+    const impact = await getUnitDeleteImpact(currentDetailUnitId);
+    let msg = `即將永久刪除「${unitName}」裡的 ${impact.total} 張單字，連同複習紀錄一起消失。`;
+    if (impact.shared > 0) {
+      msg += `\n其中 ${impact.shared} 張也屬於其他單元，刪除後將從所有單元消失。`;
+    }
+    if (!confirm(msg + '\n\n這個動作無法復原，確定要繼續嗎？')) {
+      return;
+    }
+
+    if (impact.shared > 0) {
+      const typed = prompt(`為了保護你的資料，請輸入單元名稱「${unitName}」以確認刪除：`);
+      if (typed !== unitName) {
+        toast.style.color = 'var(--warn)';
+        toast.textContent = '輸入的名稱不符，已取消刪除';
+        return;
+      }
+    }
+
     const deleteError = await deleteCardsInUnit(currentDetailUnitId);
     if (deleteError) {
       toast.style.color = 'var(--danger)';
       toast.textContent = '刪除單字失敗：' + deleteError.message;
+      return;
+    }
+  } else {
+    if (!confirm(`確定要刪除「${unitName}」嗎？\n\n單字本身不會被刪除，會變成未分類。這個動作無法復原。`)) {
       return;
     }
   }
@@ -2203,6 +2280,57 @@ document.getElementById('review-unit-select').addEventListener('change', (e) => 
   loadDueCards();
 });
 
+// ===== 每日新卡上限 =====
+// 目的：課本詞庫一次匯入幾百字時，不要讓學生一次面對幾百張全新卡片。
+// 「新卡」定義是「從沒複習過（last_reviewed_at 是 null）」；已經在學習中或已畢業、
+// 現在到期要複習的卡不受這個上限影響，一律照常出現。
+let dailyNewLimit = 15;
+let hiddenNewCount = 0; // 因為超過今日新卡上限而還沒放進佇列的張數，給空狀態文案用
+
+async function loadUserSettings() {
+  const { data } = await sb.from('user_settings').select('daily_new_limit').eq('user_id', currentUser.id).maybeSingle();
+  dailyNewLimit = data ? data.daily_new_limit : 15;
+  document.getElementById('daily-new-limit-input').value = dailyNewLimit;
+}
+
+document.getElementById('save-new-limit-btn').onclick = async () => {
+  const toast = document.getElementById('new-limit-toast');
+  const value = parseInt(document.getElementById('daily-new-limit-input').value, 10);
+
+  if (isNaN(value) || value < 0) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '請輸入 0 以上的數字';
+    return;
+  }
+
+  const { error } = await sb.from('user_settings').upsert({ user_id: currentUser.id, daily_new_limit: value });
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '儲存失敗：' + error.message;
+    return;
+  }
+
+  dailyNewLimit = value;
+  toast.style.color = 'var(--accent)';
+  toast.textContent = '已儲存';
+  loadDueCards();
+};
+
+// 算今天已經學了幾張全新卡（用 review_logs 的 category='new' 算，不是只看這個分頁的 session，
+// 這樣重新整理或換分頁都還是同一個每日上限）
+async function countTodayNewReviews() {
+  const todayStr = taipeiDateStr();
+  const since = new Date();
+  since.setDate(since.getDate() - 1);
+  since.setHours(0, 0, 0, 0);
+
+  const { data: logs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('reviewed_at').eq('category', 'new').gte('reviewed_at', since.toISOString()).range(from, to)
+  );
+
+  return (logs || []).filter(l => taipeiDateStr(new Date(l.reviewed_at)) === todayStr).length;
+}
+
 async function loadDueCards() {
   const today = taipeiDateStr();
 
@@ -2224,32 +2352,77 @@ async function loadDueCards() {
     filtered = filtered.filter(s => allowedIds.has(s.card_id));
   }
 
+  const dueOnly = filtered.filter(s => s.last_reviewed_at);
+  const brandNew = filtered.filter(s => !s.last_reviewed_at);
+
+  const todayNewCount = await countTodayNewReviews();
+  const remainingAllowance = Math.max(0, dailyNewLimit - todayNewCount);
+  const cappedNew = brandNew.slice(0, remainingAllowance);
+  hiddenNewCount = brandNew.length - cappedNew.length;
+
   // dueCards 是本輪的佇列，之後「重來/困難」會把卡片重新插入這個陣列中間，不是重新查資料庫
-  dueCards = filtered;
+  dueCards = dueOnly.concat(cappedNew);
   currentCardIndex = 0;
 
-  document.getElementById('stat-due').textContent = filtered.length;
+  document.getElementById('stat-due').textContent = dueOnly.length;
+  document.getElementById('stat-new').textContent = cappedNew.length;
   renderReviewArea();
 }
 
-function renderReviewArea() {
+async function renderReviewArea() {
   const area = document.getElementById('review-area');
 
   if (dueCards.length === 0) {
+    const { count: totalCards } = await sb.from('cards').select('id', { count: 'exact', head: true });
+
+    if (!totalCards) {
+      let teacherLine = '';
+      try {
+        const { data: teachers } = await sb.rpc('get_my_teachers');
+        if (teachers && teachers.length > 0) {
+          const label = escapeHtml(teachers[0].display_name || teachers[0].email);
+          teacherLine = `<div style="margin-top:10px;font-size:14px;">你已加入 <b>${label}</b> 老師的班級，先從課本單字庫開始吧。</div>`;
+        }
+      } catch (e) { /* 拿不到老師資訊不影響空狀態顯示 */ }
+
+      area.innerHTML = `
+        <div class="empty-state">
+          <div class="big">📚</div>
+          <div>還沒有單字卡</div>
+          ${teacherLine}
+          <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn-primary" id="empty-go-import-btn" style="flex:1;">從課本單字庫開始</button>
+            <button class="btn-secondary" id="empty-go-add-btn" style="flex:1;">手動新增</button>
+          </div>
+        </div>
+      `;
+      document.getElementById('empty-go-import-btn').onclick = () => document.querySelector('.tab[data-tab="import"]').click();
+      document.getElementById('empty-go-add-btn').onclick = () => document.querySelector('.tab[data-tab="add"]').click();
+      return;
+    }
+
+    const hiddenLine = hiddenNewCount > 0
+      ? `<div style="margin-top:8px;font-size:13px;color:var(--muted);">今天的新卡上限已經用完了，還有 ${hiddenNewCount} 張新卡明天見。</div>`
+      : '';
     area.innerHTML = `
       <div class="empty-state">
         <div class="big">🎉</div>
         <div>這個範圍今天沒有需要複習的單字了</div>
+        ${hiddenLine}
       </div>
     `;
     return;
   }
 
   if (currentCardIndex >= dueCards.length) {
+    const hiddenLine = hiddenNewCount > 0
+      ? `<div style="margin-top:8px;font-size:13px;color:var(--muted);">明天還有 ${hiddenNewCount} 張新卡等你，今天先休息吧！</div>`
+      : '';
     area.innerHTML = `
       <div class="empty-state">
         <div class="big">✅</div>
-        <div>這一輪複習完成了！</div>
+        <div>今日計畫完成！</div>
+        ${hiddenLine}
       </div>
     `;
     return;
@@ -2341,6 +2514,7 @@ document.addEventListener('keydown', (e) => {
     const answerButtons = document.getElementById('answer-buttons');
     if (!answerButtons || answerButtons.classList.contains('hidden')) return;
     if (currentCardIndex >= dueCards.length) return;
+    if (isGrading) return;
     e.preventDefault();
     gradeCard(dueCards[currentCardIndex], GRADE_KEYS[e.key]);
   }
@@ -2500,49 +2674,71 @@ function getReviewCategory(item) {
   return 'review';
 }
 
+let isGrading = false; // 防止連點按鈕或連按鍵盤快捷鍵對同一張卡送出兩次評分
+
+function setGradingUiLocked(locked) {
+  const answerButtons = document.getElementById('answer-buttons');
+  if (!answerButtons) return;
+  answerButtons.querySelectorAll('.ans-btn').forEach(btn => { btn.disabled = locked; });
+  answerButtons.style.opacity = locked ? '0.5' : '1';
+  answerButtons.style.pointerEvents = locked ? 'none' : 'auto';
+}
+
 async function gradeCard(item, grade) {
-  const category = getReviewCategory(item);
-  const durationMs = cardShownAt ? Math.max(0, Math.round(Date.now() - cardShownAt)) : null;
+  if (isGrading) return;
+  isGrading = true;
+  setGradingUiLocked(true);
 
-  const updated = calcNextReview(item, grade);
-  const requeue = updated.requeue;
-  delete updated.requeue; // 這個欄位只是前端邏輯用，不寫進資料庫
+  // try/finally 確保不管中途發生什麼（包括意外拋出的例外），isGrading 一定會解鎖，
+  // 不然評分畫面會永久卡死、之後怎麼點都沒反應，使用者只能重新整理頁面。
+  try {
+    const category = getReviewCategory(item);
+    const durationMs = cardShownAt ? Math.max(0, Math.round(Date.now() - cardShownAt)) : null;
 
-  // 更新排程 + 寫入紀錄包在 Supabase 的 grade_card RPC 裡，是同一筆資料庫交易，
-  // 不會再有「排程更新成功但紀錄沒寫到」這種中間狀態。
-  const { error: rpcError } = await sb.rpc('grade_card', {
-    p_card_id: item.card_id,
-    p_grade: grade,
-    p_ease_factor: updated.ease_factor,
-    p_interval_days: updated.interval_days,
-    p_repetitions: updated.repetitions,
-    p_learning_step: updated.learning_step,
-    p_is_learning: updated.is_learning,
-    p_next_review_date: updated.next_review_date,
-    p_duration_ms: durationMs,
-    p_category: category,
-  });
+    const updated = calcNextReview(item, grade);
+    const requeue = updated.requeue;
+    delete updated.requeue; // 這個欄位只是前端邏輯用，不寫進資料庫
 
-  if (rpcError) {
-    document.getElementById('review-error').textContent = '複習紀錄儲存失敗，請檢查網路連線後重試：' + rpcError.message;
-    return; // 停在原地，不跳下一張，避免資料不一致
+    // 更新排程 + 寫入紀錄包在 Supabase 的 grade_card RPC 裡，是同一筆資料庫交易，
+    // 不會再有「排程更新成功但紀錄沒寫到」這種中間狀態。
+    const { error: rpcError } = await sb.rpc('grade_card', {
+      p_card_id: item.card_id,
+      p_grade: grade,
+      p_ease_factor: updated.ease_factor,
+      p_interval_days: updated.interval_days,
+      p_repetitions: updated.repetitions,
+      p_learning_step: updated.learning_step,
+      p_is_learning: updated.is_learning,
+      p_next_review_date: updated.next_review_date,
+      p_duration_ms: durationMs,
+      p_category: category,
+    });
+
+    if (rpcError) {
+      document.getElementById('review-error').textContent = '複習紀錄儲存失敗，請檢查網路連線後重試：' + rpcError.message;
+      return; // 停在原地，不跳下一張，避免資料不一致（finally 還是會解鎖，讓使用者能重試）
+    }
+    document.getElementById('review-error').textContent = '';
+
+    // 更新本地 item 狀態，供之後可能的重排使用
+    Object.assign(item, updated);
+
+    if (requeue) {
+      // 從佇列移除，插入到後面（模擬「稍後再考」，往後插 3~6 張的位置）
+      dueCards.splice(currentCardIndex, 1);
+      const insertAt = Math.min(dueCards.length, currentCardIndex + 3 + Math.floor(Math.random() * 3));
+      dueCards.splice(insertAt, 0, item);
+      // currentCardIndex 不變，直接顯示佇列裡現在這個位置的下一張
+    } else {
+      currentCardIndex += 1;
+    }
+
+    document.getElementById('stat-due').textContent = dueCards.length - currentCardIndex;
+    renderReviewArea();
+  } finally {
+    isGrading = false;
+    setGradingUiLocked(false);
   }
-  document.getElementById('review-error').textContent = '';
-
-  // 更新本地 item 狀態，供之後可能的重排使用
-  Object.assign(item, updated);
-
-  if (requeue) {
-    // 從佇列移除，插入到後面（模擬「稍後再考」，往後插 3~6 張的位置）
-    dueCards.splice(currentCardIndex, 1);
-    const insertAt = Math.min(dueCards.length, currentCardIndex + 3 + Math.floor(Math.random() * 3));
-    dueCards.splice(insertAt, 0, item);
-    // currentCardIndex 不變，直接顯示佇列裡現在這個位置的下一張
-  } else {
-    currentCardIndex += 1;
-  }
-
-  renderReviewArea();
 }
 
 // ===== 統計 =====
