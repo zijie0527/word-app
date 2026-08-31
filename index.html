@@ -772,8 +772,12 @@
     <p class="sub">間隔重複複習，跨裝置同步</p>
     <div class="auth-box">
       <div class="field">
-        <label>Email</label>
-        <input type="email" id="auth-email" placeholder="you@example.com">
+        <label>帳號（例如座號、學號）</label>
+        <input type="text" id="auth-id" placeholder="例如：a01 或 23">
+      </div>
+      <div class="field" id="auth-name-field">
+        <label>姓名（第一次註冊時填寫）</label>
+        <input type="text" id="auth-name" placeholder="例如：王小明">
       </div>
       <div class="field">
         <label>密碼</label>
@@ -988,28 +992,79 @@
 
     <!-- TEACHER TAB -->
     <div id="tab-teacher" class="hidden">
-      <div class="card-box">
-        <h2>我的學生</h2>
-        <div class="field">
-          <button class="btn-secondary" id="gen-invite-btn">產生邀請碼</button>
+      <div id="teacher-main-view">
+        <div class="card-box">
+          <h2>我的學生</h2>
+          <div class="field">
+            <button class="btn-secondary" id="gen-invite-btn">產生邀請碼</button>
+          </div>
+          <div id="invite-code-display"></div>
+          <div class="toast" id="teacher-toast"></div>
+          <div id="active-invite-list"></div>
         </div>
-        <div id="invite-code-display"></div>
-        <div class="toast" id="teacher-toast"></div>
-        <div id="active-invite-list"></div>
-      </div>
-      <div class="card-box" id="students-list-box">
-        <div id="students-list"></div>
+        <div class="card-box" id="students-list-box">
+          <div id="students-list"></div>
+        </div>
+
+        <div class="card-box">
+          <h2>加入老師</h2>
+          <div class="field">
+            <label>老師給你的邀請碼</label>
+            <input type="text" id="join-code-input" placeholder="例如：AB12CD" style="text-transform:uppercase;">
+          </div>
+          <button class="btn-primary" id="join-teacher-btn">加入</button>
+          <div class="toast" id="join-toast"></div>
+          <div id="my-teachers-list"></div>
+        </div>
       </div>
 
-      <div class="card-box">
-        <h2>加入老師</h2>
-        <div class="field">
-          <label>老師給你的邀請碼</label>
-          <input type="text" id="join-code-input" placeholder="例如：AB12CD" style="text-transform:uppercase;">
+      <!-- 學生統計詳情（點某個學生後顯示） -->
+      <div id="student-stats-view" class="hidden">
+        <button class="btn-text" id="back-to-students-btn" style="text-align:left;padding-left:0;">← 返回學生列表</button>
+        <div class="card-box">
+          <h2 id="student-stats-title">學生統計</h2>
         </div>
-        <button class="btn-primary" id="join-teacher-btn">加入</button>
-        <div class="toast" id="join-toast"></div>
-        <div id="my-teachers-list"></div>
+        <div class="card-box">
+          <div class="streak-row">
+            <div class="streak-num" id="student-streak-num">0</div>
+            <div class="streak-label">🔥 連續複習天數</div>
+          </div>
+          <div class="calendar-header">
+            <button class="cal-nav-btn" id="student-cal-prev-btn" type="button">‹</button>
+            <span class="calendar-title" id="student-calendar-title"></span>
+            <button class="cal-nav-btn" id="student-cal-next-btn" type="button">›</button>
+          </div>
+          <div class="calendar-weekdays">
+            <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+          </div>
+          <div class="calendar-grid" id="student-calendar-grid"></div>
+        </div>
+        <div class="card-box">
+          <h2>今日摘要</h2>
+          <div id="student-today-summary"></div>
+        </div>
+        <div class="card-box">
+          <h2>近 7 天正確率</h2>
+          <div class="accuracy-row">
+            <div class="accuracy-stat">
+              <div class="accuracy-num" id="student-accuracy-pct">-</div>
+              <div class="accuracy-label">正確率</div>
+            </div>
+            <div class="accuracy-stat">
+              <div class="accuracy-num" id="student-accuracy-total">-</div>
+              <div class="accuracy-label">總複習次數</div>
+            </div>
+          </div>
+          <div class="grade-bar-row" id="student-grade-bar-row"></div>
+        </div>
+        <div class="card-box">
+          <h2>近 7 天複習量</h2>
+          <div class="bar-chart" id="student-daily-chart"></div>
+        </div>
+        <div class="card-box">
+          <h2>各單元進度</h2>
+          <div id="student-unit-progress-list"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1051,39 +1106,78 @@ const appScreen = document.getElementById('app-screen');
 const authError = document.getElementById('auth-error');
 
 // ===== Auth =====
+// Supabase Auth 本身是用 email 當帳號，這裡讓使用者輸入的「帳號」（例如座號）
+// 轉成一個內部用的假信箱，不會真的寄信，也不會顯示給任何人看。
+// 帳號格式限制英數字、底線、連字號，避免轉出來的假信箱格式不合法。
+function idToEmail(id) {
+  return id.trim().toLowerCase() + '@word-app.local';
+}
+
+function isValidAccountId(id) {
+  return /^[a-z0-9_-]+$/i.test(id);
+}
+
 document.getElementById('login-btn').onclick = async () => {
-  const email = document.getElementById('auth-email').value.trim();
+  const id = document.getElementById('auth-id').value.trim();
   const password = document.getElementById('auth-password').value;
   authError.style.color = 'var(--danger)';
   authError.textContent = '';
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) { authError.textContent = error.message; return; }
+
+  if (!id) {
+    authError.textContent = '請輸入帳號';
+    return;
+  }
+
+  const { data, error } = await sb.auth.signInWithPassword({ email: idToEmail(id), password });
+  if (error) {
+    authError.textContent = error.message === 'Invalid login credentials' ? '帳號或密碼錯誤' : error.message;
+    return;
+  }
   onLoggedIn(data.user);
 };
 
 document.getElementById('signup-btn').onclick = async () => {
-  const email = document.getElementById('auth-email').value.trim();
+  const id = document.getElementById('auth-id').value.trim();
+  const name = document.getElementById('auth-name').value.trim();
   const password = document.getElementById('auth-password').value;
+  authError.style.color = 'var(--danger)';
   authError.textContent = '';
-  if (!email || password.length < 6) {
-    authError.textContent = '請輸入 Email 並設定至少 6 碼密碼';
+
+  if (!id || !isValidAccountId(id)) {
+    authError.textContent = '帳號請輸入英文或數字（可以有 - 和 _），例如 a01 或 23';
     return;
   }
-  const { data, error } = await sb.auth.signUp({ email, password });
+  if (!name) {
+    authError.textContent = '請輸入姓名';
+    return;
+  }
+  if (password.length < 6) {
+    authError.textContent = '密碼至少要 6 碼';
+    return;
+  }
+
+  const { data, error } = await sb.auth.signUp({
+    email: idToEmail(id),
+    password,
+    options: { data: { display_name: name } },
+  });
+
   if (error) {
-    authError.style.color = 'var(--danger)';
-    authError.textContent = error.message;
+    authError.textContent = error.message.includes('already registered')
+      ? '這個帳號已經有人用過了，換一個試試'
+      : error.message;
     return;
   }
 
   // 關鍵：用 data.session 判斷，不是 data.user——
   // 如果 Supabase 開了 Email 驗證，data.user 通常還是有值，但 session 會是 null，
-  // 代表帳號建立了但還不能登入，要先去收信驗證。
+  // 代表帳號建立了但還不能登入。這個系統用的是內部合成的假信箱收不到真的驗證信，
+  // 正常情況下 Email 驗證必須維持關閉，不然新帳號會卡在這裡進不去。
   if (data.session) {
     onLoggedIn(data.session.user);
   } else {
-    authError.style.color = 'var(--accent)';
-    authError.textContent = '註冊成功！請前往你的信箱收取驗證信，完成驗證後再回來登入。';
+    authError.style.color = 'var(--danger)';
+    authError.textContent = '註冊完成但需要 Email 驗證才能登入，請聯絡老師處理（這個系統的帳號用假信箱，收不到驗證信）。';
   }
 };
 
@@ -1168,6 +1262,18 @@ async function fetchAllRows(buildQuery) {
     from += PAGE_SIZE;
   }
   return { data: all, error: null };
+}
+
+// 跟 fetchAllRows 一樣，但用在 .in('card_id', cardIds) 這種 id 清單可能很長的情況，
+// 先把 id 清單切成小批，避免單一請求的網址過長。
+async function fetchAllRowsInChunks(ids, chunkSize, buildQuery) {
+  let all = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const { data } = await fetchAllRows((from, to) => buildQuery(chunk).range(from, to));
+    all = all.concat(data || []);
+  }
+  return all;
 }
 
 // 刪除某個單元底下的「所有單字本身」（不是只解除關聯）。
@@ -2840,7 +2946,7 @@ document.getElementById('join-teacher-btn').onclick = async () => {
     return;
   }
 
-  const { data: teacherEmail, error } = await sb.rpc('redeem_invite_code', { p_code: code });
+  const { data: teacherLabel, error } = await sb.rpc('redeem_invite_code', { p_code: code });
 
   if (error) {
     toast.style.color = 'var(--danger)';
@@ -2849,7 +2955,7 @@ document.getElementById('join-teacher-btn').onclick = async () => {
   }
 
   toast.style.color = 'var(--accent)';
-  toast.textContent = `已加入老師：${teacherEmail}`;
+  toast.textContent = `已加入老師：${teacherLabel}`;
   input.value = '';
   loadMyTeachers();
 };
@@ -2864,7 +2970,7 @@ async function loadMyTeachers() {
   }
 
   listEl.innerHTML = '<div style="margin-top:14px;font-size:13px;color:var(--muted);">目前的老師：' +
-    data.map(t => escapeHtml(t.email)).join('、') + '</div>';
+    data.map(t => escapeHtml(t.display_name || t.email)).join('、') + '</div>';
 }
 
 // 一次把所有已連結學生的 cards / review_state / review_logs 抓回來，
@@ -2933,9 +3039,9 @@ async function loadMyStudents() {
     }
 
     return `
-      <div class="student-row">
+      <div class="student-row" data-id="${r.student_id}" style="cursor:pointer;">
         <div class="student-row-top">
-          <span class="student-email">${escapeHtml(r.email)}</span>
+          <span class="student-email">${escapeHtml(r.display_name || r.email)}</span>
           ${badge}
         </div>
         <div class="student-metrics">
@@ -2946,6 +3052,248 @@ async function loadMyStudents() {
       </div>
     `;
   }).join('');
+
+  listEl.querySelectorAll('.student-row').forEach(row => {
+    row.onclick = () => {
+      const student = rows.find(r => r.student_id === row.dataset.id);
+      openStudentStats(student.student_id, student.display_name || student.email);
+    };
+  });
+}
+
+// ===== 老師檢視單一學生的統計（唯讀，跟自己的統計頁用同一套邏輯，但資料來源改成學生） =====
+let studentCalendarYear;
+let studentCalendarMonth;
+let studentReviewCountByDate = {};
+
+async function openStudentStats(studentId, label) {
+  document.getElementById('teacher-main-view').classList.add('hidden');
+  document.getElementById('student-stats-view').classList.remove('hidden');
+  document.getElementById('student-stats-title').textContent = label + ' 的統計';
+
+  const [y, m] = taipeiDateStr().split('-').map(Number);
+  studentCalendarYear = y;
+  studentCalendarMonth = m - 1;
+
+  const { data: cards } = await fetchAllRows((from, to) =>
+    sb.from('cards').select('id').eq('user_id', studentId).range(from, to)
+  );
+  const cardIds = (cards || []).map(c => c.id);
+
+  await loadStudentStreakAndCalendar(studentId);
+  await loadStudentTodaySummary(studentId);
+  await loadStudentAccuracy(cardIds);
+  await loadStudentDailyChart(cardIds);
+  await loadStudentUnitProgress(studentId, cardIds);
+}
+
+document.getElementById('back-to-students-btn').onclick = () => {
+  document.getElementById('student-stats-view').classList.add('hidden');
+  document.getElementById('teacher-main-view').classList.remove('hidden');
+};
+
+async function loadStudentStreakAndCalendar(studentId) {
+  const oneYearAgo = new Date();
+  oneYearAgo.setDate(oneYearAgo.getDate() - 370);
+
+  const { data: yearLogs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('reviewed_at').eq('user_id', studentId).gte('reviewed_at', oneYearAgo.toISOString()).range(from, to)
+  );
+
+  studentReviewCountByDate = {};
+  (yearLogs || []).forEach(l => {
+    const d = taipeiDateStr(new Date(l.reviewed_at));
+    studentReviewCountByDate[d] = (studentReviewCountByDate[d] || 0) + 1;
+  });
+
+  document.getElementById('student-streak-num').textContent = computeStreak(new Set(Object.keys(studentReviewCountByDate)));
+  renderStudentCalendarMonth();
+}
+
+function renderStudentCalendarMonth() {
+  document.getElementById('student-calendar-title').textContent = `${studentCalendarYear} 年 ${studentCalendarMonth + 1} 月`;
+
+  const daysInMonth = new Date(Date.UTC(studentCalendarYear, studentCalendarMonth + 1, 0)).getUTCDate();
+  const pad = (n) => String(n).padStart(2, '0');
+  const firstWeekday = dateStrToWeekday(`${studentCalendarYear}-${pad(studentCalendarMonth + 1)}-01`);
+  const todayStr = taipeiDateStr();
+
+  let html = '';
+  for (let i = 0; i < firstWeekday; i++) html += '<div class="calendar-cell empty"></div>';
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${studentCalendarYear}-${pad(studentCalendarMonth + 1)}-${pad(day)}`;
+    const count = studentReviewCountByDate[dateStr] || 0;
+    let level = 0;
+    if (count >= 30) level = 3;
+    else if (count >= 10) level = 2;
+    else if (count >= 1) level = 1;
+    const todayClass = dateStr === todayStr ? ' today' : '';
+    html += `<div class="calendar-cell level-${level}${todayClass}" title="${dateStr}：${count} 張">${day}</div>`;
+  }
+
+  document.getElementById('student-calendar-grid').innerHTML = html;
+}
+
+document.getElementById('student-cal-prev-btn').onclick = () => {
+  studentCalendarMonth--;
+  if (studentCalendarMonth < 0) { studentCalendarMonth = 11; studentCalendarYear--; }
+  renderStudentCalendarMonth();
+};
+
+document.getElementById('student-cal-next-btn').onclick = () => {
+  studentCalendarMonth++;
+  if (studentCalendarMonth > 11) { studentCalendarMonth = 0; studentCalendarYear++; }
+  renderStudentCalendarMonth();
+};
+
+async function loadStudentTodaySummary(studentId) {
+  const todayStr = taipeiDateStr();
+  const since = new Date();
+  since.setDate(since.getDate() - 1);
+  since.setHours(0, 0, 0, 0);
+
+  const { data: logs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('grade, duration_ms, category, reviewed_at').eq('user_id', studentId).gte('reviewed_at', since.toISOString()).range(from, to)
+  );
+
+  const todayLogs = (logs || []).filter(l => taipeiDateStr(new Date(l.reviewed_at)) === todayStr);
+  const el = document.getElementById('student-today-summary');
+
+  if (todayLogs.length === 0) {
+    el.innerHTML = '<p style="color:var(--muted);font-size:14px;">今天還沒有複習紀錄</p>';
+    return;
+  }
+
+  const count = todayLogs.length;
+  const withDuration = todayLogs.filter(l => l.duration_ms != null);
+  const totalMs = withDuration.reduce((sum, l) => sum + l.duration_ms, 0);
+  const totalSeconds = Math.round(totalMs / 100) / 10;
+  const avgSeconds = withDuration.length > 0 ? Math.round(totalMs / withDuration.length / 100) / 10 : null;
+
+  const againCount = todayLogs.filter(l => l.grade === 'again').length;
+  const againPct = Math.round((againCount / count) * 100);
+
+  const newCount = todayLogs.filter(l => l.category === 'new').length;
+  const reviewCount = todayLogs.filter(l => l.category === 'review').length;
+  const relearnCount = todayLogs.filter(l => l.category === 'relearn').length;
+
+  const durationLine = withDuration.length > 0
+    ? `今天學習了 <b>${count}</b> 張卡片，耗時 <b>${totalSeconds}</b> 秒（<b>${avgSeconds}</b> 秒/張）`
+    : `今天學習了 <b>${count}</b> 張卡片`;
+
+  el.innerHTML = `
+    <p style="font-size:14px;margin:0 0 10px;">${durationLine}</p>
+    <p style="font-size:14px;margin:0 0 10px;">按下「重來」的次數：<b>${againCount}</b>（${againPct}%）</p>
+    <p style="font-size:13px;color:var(--muted);margin:0;">新學習：${newCount} 張 ‧ 複習：${reviewCount} 張 ‧ 重新學習：${relearnCount} 張</p>
+  `;
+}
+
+async function loadStudentAccuracy(cardIds) {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  const logs = cardIds.length
+    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) =>
+        sb.from('review_logs').select('grade, card_id').in('card_id', chunk).gte('reviewed_at', sevenDaysAgo.toISOString())
+      )
+    : [];
+
+  const total = logs.length;
+  const counts = { again: 0, hard: 0, good: 0, easy: 0 };
+  logs.forEach(l => { if (counts.hasOwnProperty(l.grade)) counts[l.grade] += 1; });
+
+  const correct = counts.good + counts.easy;
+  const pct = total > 0 ? Math.round((correct / total) * 100) : null;
+
+  document.getElementById('student-accuracy-pct').textContent = pct === null ? '-' : pct + '%';
+  document.getElementById('student-accuracy-total').textContent = total;
+
+  const barRow = document.getElementById('student-grade-bar-row');
+  if (total === 0) { barRow.innerHTML = ''; return; }
+
+  const colors = { again: 'var(--danger)', hard: 'var(--warn)', good: 'var(--accent)', easy: 'var(--blue)' };
+  barRow.innerHTML = ['again', 'hard', 'good', 'easy'].map(g => {
+    const widthPct = (counts[g] / total) * 100;
+    if (widthPct === 0) return '';
+    return `<div class="grade-seg" style="width:${widthPct}%;background:${colors[g]};"></div>`;
+  }).join('');
+}
+
+async function loadStudentDailyChart(cardIds) {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+  sevenDaysAgo.setHours(0, 0, 0, 0);
+
+  const logs = cardIds.length
+    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) =>
+        sb.from('review_logs').select('card_id, reviewed_at').in('card_id', chunk).gte('reviewed_at', sevenDaysAgo.toISOString())
+      )
+    : [];
+
+  const counts = {};
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = taipeiDateStr(d);
+    days.push(key);
+    counts[key] = 0;
+  }
+
+  logs.forEach(l => {
+    const key = taipeiDateStr(new Date(l.reviewed_at));
+    if (counts.hasOwnProperty(key)) counts[key] += 1;
+  });
+
+  const maxCount = Math.max(1, ...Object.values(counts));
+  const chartEl = document.getElementById('student-daily-chart');
+
+  chartEl.innerHTML = days.map(day => {
+    const count = counts[day];
+    const heightPct = Math.round((count / maxCount) * 100);
+    const label = new Date(day + 'T00:00:00').toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+    return `
+      <div class="bar-col">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">${count}</div>
+        <div class="bar" style="height:${Math.max(heightPct, 2)}%;"></div>
+        <div class="bar-label">${label}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadStudentUnitProgress(studentId, cardIds) {
+  const listEl = document.getElementById('student-unit-progress-list');
+
+  const { data: units } = await fetchAllRows((from, to) => sb.from('units').select('id, name').eq('user_id', studentId).range(from, to));
+
+  if (!units || units.length === 0) {
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:14px;">這個學生還沒有建立單元</p>';
+    return;
+  }
+
+  const links = cardIds.length
+    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) => sb.from('card_units').select('card_id, unit_id').in('card_id', chunk))
+    : [];
+  const states = cardIds.length
+    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) => sb.from('review_state').select('card_id, repetitions').in('card_id', chunk))
+    : [];
+
+  const stateMap = {};
+  states.forEach(s => { stateMap[s.card_id] = s.repetitions; });
+
+  const sortedUnits = [...units].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const rows = sortedUnits.map(unit => {
+    const unitCardIds = links.filter(l => l.unit_id === unit.id).map(l => l.card_id);
+    const total = unitCardIds.length;
+    const learned = unitCardIds.filter(id => (stateMap[id] || 0) >= 2).length;
+    const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
+    return { name: unit.name, total, learned, pct };
+  });
+
+  listEl.innerHTML = rows.map(r => renderProgressRow(r.name, r.learned, r.total, r.pct)).join('');
 }
 </script>
 
