@@ -379,6 +379,18 @@
     flex-shrink: 0;
   }
 
+  .exam-countdown-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+
+  .exam-countdown-row b { color: var(--accent); }
+
+  #weekly-goal-progress { margin-top: 12px; }
+
   .review-card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -856,6 +868,11 @@
         </div>
       </div>
 
+      <div class="card-box" id="goal-box">
+        <div id="exam-countdown"></div>
+        <div id="weekly-goal-progress"></div>
+      </div>
+
       <div class="new-limit-row">
         <label for="daily-new-limit-input">每天新卡上限</label>
         <input type="number" id="daily-new-limit-input" min="0" max="200">
@@ -1097,6 +1114,29 @@
         <button class="btn-text" id="back-to-students-btn" style="text-align:left;padding-left:0;">← 返回學生列表</button>
         <div class="card-box">
           <h2 id="student-stats-title">學生統計</h2>
+        </div>
+        <div class="card-box">
+          <h2>目標設定（老師可修改）</h2>
+          <div class="field">
+            <label>第一次段考日期</label>
+            <input type="date" id="student-exam-date-1">
+          </div>
+          <div class="field">
+            <label>第二次段考日期</label>
+            <input type="date" id="student-exam-date-2">
+          </div>
+          <div class="field">
+            <label>第三次段考日期</label>
+            <input type="date" id="student-exam-date-3">
+          </div>
+          <div class="field">
+            <label>本週目標張數</label>
+            <input type="number" id="student-weekly-goal" min="0">
+          </div>
+          <button class="btn-secondary" id="save-student-settings-btn">儲存設定</button>
+          <div class="toast" id="student-settings-toast"></div>
+          <div id="student-exam-countdown-preview" style="margin-top:10px;"></div>
+          <div id="student-weekly-goal-preview" style="margin-top:10px;"></div>
         </div>
         <div class="card-box">
           <div class="streak-row">
@@ -2427,12 +2467,90 @@ let hiddenNewCount = 0; // 因為超過今日新卡上限而還沒放進佇列�
 
 let exampleBeforeFlip = true;
 
+let examDates = [null, null, null];
+let weeklyGoal = 100;
+const EXAM_LABELS = ['第一次段考', '第二次段考', '第三次段考'];
+
 async function loadUserSettings() {
-  const { data } = await sb.from('user_settings').select('daily_new_limit, example_before_flip').eq('user_id', currentUser.id).maybeSingle();
+  const { data } = await sb
+    .from('user_settings')
+    .select('daily_new_limit, example_before_flip, exam_date_1, exam_date_2, exam_date_3, weekly_goal')
+    .eq('user_id', currentUser.id)
+    .maybeSingle();
+
   dailyNewLimit = data ? data.daily_new_limit : 15;
   exampleBeforeFlip = data ? data.example_before_flip : true;
+  examDates = data ? [data.exam_date_1, data.exam_date_2, data.exam_date_3] : [null, null, null];
+  weeklyGoal = data ? data.weekly_goal : 100;
+
   document.getElementById('daily-new-limit-input').value = dailyNewLimit;
   document.getElementById('example-before-flip-checkbox').checked = exampleBeforeFlip;
+
+  renderExamCountdown();
+  await renderWeeklyGoalProgress();
+}
+
+// 考試日期跟本週目標都是老師可以幫學生設定的，所以顯示邏輯獨立成函式，
+// 老師端的學生詳情頁也會用同一套邏輯（只是資料來源換成該學生）。
+function renderExamCountdownFor(el, dates) {
+  const todayStr = taipeiDateStr();
+  const items = dates
+    .map((d, i) => ({ label: EXAM_LABELS[i], date: d }))
+    .filter(x => x.date);
+
+  if (items.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  items.sort((a, b) => a.date.localeCompare(b.date));
+
+  el.innerHTML = items.map(x => {
+    const diffDays = Math.round((new Date(x.date + 'T00:00:00Z') - new Date(todayStr + 'T00:00:00Z')) / 86400000);
+    let text;
+    if (diffDays > 0) text = `還有 ${diffDays} 天`;
+    else if (diffDays === 0) text = '就是今天！';
+    else text = `已過 ${-diffDays} 天`;
+    return `<div class="exam-countdown-row"><span>${escapeHtml(x.label)}（${x.date}）</span><b>${text}</b></div>`;
+  }).join('');
+}
+
+function renderExamCountdown() {
+  renderExamCountdownFor(document.getElementById('exam-countdown'), examDates);
+}
+
+// 本週定義為台灣時區的週一到現在
+function getMondayOfThisWeek() {
+  const todayStr = taipeiDateStr();
+  const weekday = dateStrToWeekday(todayStr); // 0=週日 ... 6=週六
+  const daysSinceMonday = weekday === 0 ? 6 : weekday - 1;
+  const monday = new Date();
+  monday.setDate(monday.getDate() - daysSinceMonday);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+async function renderWeeklyGoalProgressFor(el, userId, goal) {
+  const monday = getMondayOfThisWeek();
+  const { data: logs } = await fetchAllRows((from, to) =>
+    sb.from('review_logs').select('id').eq('user_id', userId).gte('reviewed_at', monday.toISOString()).range(from, to)
+  );
+  const count = (logs || []).length;
+  const pct = goal > 0 ? Math.min(100, Math.round((count / goal) * 100)) : 0;
+
+  el.innerHTML = `
+    <div class="unit-progress-name">
+      <span>本週目標</span>
+      <span style="color:var(--muted);font-weight:400;">${count}/${goal}</span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" style="width:${pct}%;"></div>
+    </div>
+  `;
+}
+
+async function renderWeeklyGoalProgress() {
+  await renderWeeklyGoalProgressFor(document.getElementById('weekly-goal-progress'), currentUser.id, weeklyGoal);
 }
 
 document.getElementById('example-before-flip-checkbox').onchange = async (e) => {
@@ -3492,7 +3610,10 @@ let studentCalendarYear;
 let studentCalendarMonth;
 let studentReviewCountByDate = {};
 
+let currentStudentStatsId = null;
+
 async function openStudentStats(studentId, label) {
+  currentStudentStatsId = studentId;
   document.getElementById('teacher-main-view').classList.add('hidden');
   document.getElementById('student-stats-view').classList.remove('hidden');
   document.getElementById('student-stats-title').textContent = label + ' 的統計';
@@ -3506,6 +3627,7 @@ async function openStudentStats(studentId, label) {
   );
   const cardIds = (cards || []).map(c => c.id);
 
+  await loadStudentSettingsForm(studentId);
   await loadStudentStreakAndCalendar(studentId);
   await loadStudentTodaySummary(studentId);
   await loadStudentAccuracy(cardIds);
@@ -3513,9 +3635,66 @@ async function openStudentStats(studentId, label) {
   await loadStudentUnitProgress(studentId, cardIds);
 }
 
+async function loadStudentSettingsForm(studentId) {
+  const { data } = await sb
+    .from('user_settings')
+    .select('exam_date_1, exam_date_2, exam_date_3, weekly_goal')
+    .eq('user_id', studentId)
+    .maybeSingle();
+
+  document.getElementById('student-exam-date-1').value = data?.exam_date_1 || '';
+  document.getElementById('student-exam-date-2').value = data?.exam_date_2 || '';
+  document.getElementById('student-exam-date-3').value = data?.exam_date_3 || '';
+  document.getElementById('student-weekly-goal').value = data ? data.weekly_goal : 100;
+
+  renderExamCountdownFor(
+    document.getElementById('student-exam-countdown-preview'),
+    [data?.exam_date_1 || null, data?.exam_date_2 || null, data?.exam_date_3 || null]
+  );
+  await renderWeeklyGoalProgressFor(
+    document.getElementById('student-weekly-goal-preview'),
+    studentId,
+    data ? data.weekly_goal : 100
+  );
+}
+
+document.getElementById('save-student-settings-btn').onclick = async () => {
+  const toast = document.getElementById('student-settings-toast');
+  toast.textContent = '';
+
+  if (!currentStudentStatsId) return;
+
+  const goalValue = parseInt(document.getElementById('student-weekly-goal').value, 10);
+  if (isNaN(goalValue) || goalValue < 0) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '本週目標請輸入 0 以上的數字';
+    return;
+  }
+
+  const payload = {
+    user_id: currentStudentStatsId,
+    exam_date_1: document.getElementById('student-exam-date-1').value || null,
+    exam_date_2: document.getElementById('student-exam-date-2').value || null,
+    exam_date_3: document.getElementById('student-exam-date-3').value || null,
+    weekly_goal: goalValue,
+  };
+
+  const { error } = await sb.from('user_settings').upsert(payload);
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '儲存失敗：' + error.message;
+    return;
+  }
+
+  toast.style.color = 'var(--accent)';
+  toast.textContent = '已儲存';
+  await loadStudentSettingsForm(currentStudentStatsId);
+};
+
 document.getElementById('back-to-students-btn').onclick = () => {
   document.getElementById('student-stats-view').classList.add('hidden');
   document.getElementById('teacher-main-view').classList.remove('hidden');
+  currentStudentStatsId = null;
 };
 
 async function loadStudentStreakAndCalendar(studentId) {
