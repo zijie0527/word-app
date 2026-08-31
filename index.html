@@ -391,6 +391,20 @@
 
   #weekly-goal-progress { margin-top: 12px; }
 
+  .assignment-row {
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .assignment-row:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .assignment-row.overdue .unit-progress-name span:first-child { color: var(--danger); }
+
   .review-card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -873,6 +887,11 @@
         <div id="weekly-goal-progress"></div>
       </div>
 
+      <div class="card-box hidden" id="assignments-box">
+        <h2>老師指派的任務</h2>
+        <div id="my-assignments"></div>
+      </div>
+
       <div class="new-limit-row">
         <label for="daily-new-limit-input">每天新卡上限</label>
         <input type="number" id="daily-new-limit-input" min="0" max="200">
@@ -1084,21 +1103,26 @@
     <!-- TEACHER TAB -->
     <div id="tab-teacher" class="hidden">
       <div id="teacher-main-view">
-        <div class="card-box">
-          <h2>我的學生</h2>
-          <div class="field">
-            <button class="btn-secondary" id="gen-invite-btn">產生邀請碼</button>
+        <div id="teacher-only-section" class="hidden">
+          <div class="card-box">
+            <h2>我的學生</h2>
+            <div class="field">
+              <button class="btn-secondary" id="gen-invite-btn">產生邀請碼</button>
+            </div>
+            <div id="invite-code-display"></div>
+            <div class="toast" id="teacher-toast"></div>
+            <div id="active-invite-list"></div>
           </div>
-          <div id="invite-code-display"></div>
-          <div class="toast" id="teacher-toast"></div>
-          <div id="active-invite-list"></div>
-        </div>
-        <div class="card-box" id="students-list-box">
-          <div id="students-list"></div>
+          <div class="card-box" id="students-list-box">
+            <div id="students-list"></div>
+          </div>
         </div>
 
         <div class="card-box">
           <h2>加入老師</h2>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">
+            輸入邀請碼加入後，老師會看到你的單字數、學習進度、正確率、複習頻率等學習資料，用於提供學習協助。
+          </div>
           <div class="field">
             <label>老師給你的邀請碼</label>
             <input type="text" id="join-code-input" placeholder="例如：AB12CD" style="text-transform:uppercase;">
@@ -1138,6 +1162,26 @@
           <div id="student-exam-countdown-preview" style="margin-top:10px;"></div>
           <div id="student-weekly-goal-preview" style="margin-top:10px;"></div>
         </div>
+
+        <div class="card-box">
+          <h2>指派任務</h2>
+          <div id="student-assignments-list"></div>
+          <div class="field" style="margin-top:14px;">
+            <label>指派單元</label>
+            <select id="assign-unit-select"></select>
+          </div>
+          <div class="field">
+            <label>期限（選填）</label>
+            <input type="date" id="assign-due-date">
+          </div>
+          <div class="field">
+            <label>備註（選填）</label>
+            <input type="text" id="assign-note" placeholder="例如：這週先練會話">
+          </div>
+          <button class="btn-secondary" id="assign-unit-btn">指派</button>
+          <div class="toast" id="assign-toast"></div>
+        </div>
+
         <div class="card-box">
           <div class="streak-row">
             <div class="streak-num" id="student-streak-num">0</div>
@@ -2488,6 +2532,7 @@ async function loadUserSettings() {
 
   renderExamCountdown();
   await renderWeeklyGoalProgress();
+  await loadMyAssignments();
 }
 
 // 考試日期跟本週目標都是老師可以幫學生設定的，所以顯示邏輯獨立成函式，
@@ -2551,6 +2596,62 @@ async function renderWeeklyGoalProgressFor(el, userId, goal) {
 
 async function renderWeeklyGoalProgress() {
   await renderWeeklyGoalProgressFor(document.getElementById('weekly-goal-progress'), currentUser.id, weeklyGoal);
+}
+
+// ===== 老師指派的任務（學生端顯示）=====
+// 完成度不是手動打勾，是直接算這個單元裡有多少字「已穩定掌握」，跟統計頁同一套標準。
+async function loadMyAssignments() {
+  const box = document.getElementById('assignments-box');
+  const el = document.getElementById('my-assignments');
+
+  const { data: assignments } = await sb
+    .from('assignments')
+    .select('id, unit_id, due_date, note, units(name)')
+    .eq('student_id', currentUser.id)
+    .order('due_date', { ascending: true, nullsFirst: false });
+
+  if (!assignments || assignments.length === 0) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+
+  const unitIds = assignments.map(a => a.unit_id);
+  const links = await fetchAllRowsInChunks(unitIds, 300, (chunk) =>
+    sb.from('card_units').select('card_id, unit_id').in('unit_id', chunk)
+  );
+  const cardIds = [...new Set(links.map(l => l.card_id))];
+  const states = cardIds.length
+    ? await fetchAllRowsInChunks(cardIds, 300, (chunk) => sb.from('review_state').select('card_id, interval_days').in('card_id', chunk))
+    : [];
+  const intervalByCard = {};
+  states.forEach(s => { intervalByCard[s.card_id] = s.interval_days; });
+
+  const todayStr = taipeiDateStr();
+
+  el.innerHTML = assignments.map(a => {
+    const cardIdsInUnit = links.filter(l => l.unit_id === a.unit_id).map(l => l.card_id);
+    const total = cardIdsInUnit.length;
+    const mature = cardIdsInUnit.filter(id => isMature(intervalByCard[id])).length;
+    const pct = total > 0 ? Math.round((mature / total) * 100) : 0;
+    const overdue = a.due_date && a.due_date < todayStr;
+    const dueLabel = a.due_date ? `期限：${a.due_date}${overdue ? '（已逾期）' : ''}` : '沒有設定期限';
+
+    return `
+      <div class="assignment-row${overdue ? ' overdue' : ''}">
+        <div class="unit-progress-name">
+          <span>${escapeHtml(a.units ? a.units.name : '未知單元')}</span>
+          <span style="color:var(--muted);font-weight:400;">${mature}/${total}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" style="width:${pct}%;"></div>
+        </div>
+        <div style="font-size:12px;color:${overdue ? 'var(--danger)' : 'var(--muted)'};margin-top:4px;">
+          ${dueLabel}${a.note ? '　・　' + escapeHtml(a.note) : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 document.getElementById('example-before-flip-checkbox').onchange = async (e) => {
@@ -3394,11 +3495,20 @@ async function loadTodaySummary() {
 }
 
 // ===== 師生（老師總覽 + 加入老師）=====
-function loadTeacherTab() {
+async function loadTeacherTab() {
   document.getElementById('teacher-toast').textContent = '';
   document.getElementById('join-toast').textContent = '';
-  loadActiveInviteCodes();
-  loadMyStudents();
+
+  // 「產生邀請碼／我的學生」只給登記過的老師帳號看，一般帳號完全看不到、
+  // 也不用猜按了會不會失敗——資料庫那邊本來就不會讓非老師帳號建立邀請碼成功，
+  // 這裡只是讓畫面跟權限一致。
+  const { data: role } = await sb.from('teacher_roles').select('user_id').eq('user_id', currentUser.id).maybeSingle();
+  document.getElementById('teacher-only-section').classList.toggle('hidden', !role);
+
+  if (role) {
+    loadActiveInviteCodes();
+    loadMyStudents();
+  }
   loadMyTeachers();
 }
 
@@ -3452,7 +3562,7 @@ document.getElementById('gen-invite-btn').onclick = async () => {
 async function loadActiveInviteCodes() {
   const { data } = await sb
     .from('invite_codes')
-    .select('code, created_at')
+    .select('code, created_at, expires_at')
     .eq('teacher_id', currentUser.id)
     .is('redeemed_by', null)
     .order('created_at', { ascending: false });
@@ -3463,12 +3573,17 @@ async function loadActiveInviteCodes() {
     return;
   }
 
-  listEl.innerHTML = data.map(c => `
-    <div class="invite-code-row">
-      <span>${escapeHtml(c.code)}（尚未使用）</span>
-      <button class="link-btn" data-code="${escapeHtml(c.code)}">作廢</button>
-    </div>
-  `).join('');
+  const nowIso = new Date().toISOString();
+  listEl.innerHTML = data.map(c => {
+    const expired = c.expires_at && c.expires_at < nowIso;
+    const status = expired ? '已過期' : `${taipeiDateStr(new Date(c.expires_at))} 前有效`;
+    return `
+      <div class="invite-code-row">
+        <span>${escapeHtml(c.code)}（${status}）</span>
+        <button class="link-btn" data-code="${escapeHtml(c.code)}">作廢</button>
+      </div>
+    `;
+  }).join('');
 
   listEl.querySelectorAll('.link-btn').forEach(btn => {
     btn.onclick = async () => {
@@ -3513,8 +3628,24 @@ async function loadMyTeachers() {
     return;
   }
 
-  listEl.innerHTML = '<div style="margin-top:14px;font-size:13px;color:var(--muted);">目前的老師：' +
-    data.map(t => escapeHtml(t.display_name || t.email)).join('、') + '</div>';
+  listEl.innerHTML = '<div style="margin-top:14px;">' + data.map(t => `
+    <div class="invite-code-row">
+      <span>${escapeHtml(t.display_name || t.email)}</span>
+      <button class="link-btn" data-teacher-id="${t.teacher_id}">離開</button>
+    </div>
+  `).join('') + '</div>';
+
+  listEl.querySelectorAll('.link-btn').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('確定要離開這位老師嗎？離開後老師就不能再看到你的學習資料了。')) return;
+      const { error } = await sb.from('teacher_links').delete().eq('teacher_id', btn.dataset.teacherId).eq('student_id', currentUser.id);
+      if (error) {
+        alert('離開失敗：' + error.message);
+        return;
+      }
+      loadMyTeachers();
+    };
+  });
 }
 
 // 一次把所有已連結學生的 cards / review_state / review_logs 抓回來，
@@ -3628,6 +3759,7 @@ async function openStudentStats(studentId, label) {
   const cardIds = (cards || []).map(c => c.id);
 
   await loadStudentSettingsForm(studentId);
+  await loadStudentAssignmentsForm(studentId);
   await loadStudentStreakAndCalendar(studentId);
   await loadStudentTodaySummary(studentId);
   await loadStudentAccuracy(cardIds);
@@ -3689,6 +3821,83 @@ document.getElementById('save-student-settings-btn').onclick = async () => {
   toast.style.color = 'var(--accent)';
   toast.textContent = '已儲存';
   await loadStudentSettingsForm(currentStudentStatsId);
+};
+
+// ===== 老師端：指派任務給這個學生（只能從學生已經有的單元裡選）=====
+async function loadStudentAssignmentsForm(studentId) {
+  const { data: units } = await fetchAllRows((from, to) =>
+    sb.from('units').select('id, name').eq('user_id', studentId).range(from, to)
+  );
+  const sortedUnits = (units || []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const selectEl = document.getElementById('assign-unit-select');
+  if (sortedUnits.length === 0) {
+    selectEl.innerHTML = '<option value="">（這個學生還沒有單元）</option>';
+    selectEl.disabled = true;
+  } else {
+    selectEl.disabled = false;
+    selectEl.innerHTML = sortedUnits.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  }
+
+  const { data: assignments } = await sb
+    .from('assignments')
+    .select('id, unit_id, due_date, note, units(name)')
+    .eq('student_id', studentId)
+    .order('due_date', { ascending: true, nullsFirst: false });
+
+  const listEl = document.getElementById('student-assignments-list');
+  if (!assignments || assignments.length === 0) {
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:14px;">還沒有指派任何任務</p>';
+    return;
+  }
+
+  listEl.innerHTML = assignments.map(a => `
+    <div class="invite-code-row">
+      <span>${escapeHtml(a.units ? a.units.name : '未知單元')}${a.due_date ? '　期限：' + a.due_date : ''}</span>
+      <button class="link-btn" data-id="${a.id}">移除</button>
+    </div>
+  `).join('');
+
+  listEl.querySelectorAll('.link-btn').forEach(btn => {
+    btn.onclick = async () => {
+      await sb.from('assignments').delete().eq('id', btn.dataset.id);
+      loadStudentAssignmentsForm(studentId);
+    };
+  });
+}
+
+document.getElementById('assign-unit-btn').onclick = async () => {
+  const toast = document.getElementById('assign-toast');
+  toast.textContent = '';
+
+  if (!currentStudentStatsId) return;
+
+  const unitId = document.getElementById('assign-unit-select').value;
+  if (!unitId) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '請選擇要指派的單元';
+    return;
+  }
+
+  const { error } = await sb.from('assignments').insert({
+    teacher_id: currentUser.id,
+    student_id: currentStudentStatsId,
+    unit_id: unitId,
+    due_date: document.getElementById('assign-due-date').value || null,
+    note: document.getElementById('assign-note').value.trim() || null,
+  });
+
+  if (error) {
+    toast.style.color = 'var(--danger)';
+    toast.textContent = '指派失敗：' + error.message;
+    return;
+  }
+
+  toast.style.color = 'var(--accent)';
+  toast.textContent = '已指派';
+  document.getElementById('assign-due-date').value = '';
+  document.getElementById('assign-note').value = '';
+  loadStudentAssignmentsForm(currentStudentStatsId);
 };
 
 document.getElementById('back-to-students-btn').onclick = () => {
